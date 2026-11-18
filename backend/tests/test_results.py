@@ -35,6 +35,21 @@ class ResultsConnection:
 
 
 class AdminResultsTests(unittest.TestCase):
+    def test_cycle_rules_reject_evaluator_group_filters(self):
+        app = create_app({"SECRET_KEY": "test-secret", "TESTING": True})
+
+        with patch("backend.core._current_user", return_value={"id": 1, "role": "super_admin"}):
+            client = app.test_client()
+            with client.session_transaction() as session:
+                session["user_id"] = 1
+            response = client.put(
+                "/api/admin/cycles/3/rules",
+                json={"rules": [{"effect": "allow", "evaluator_group": "faculty"}]},
+            )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("Evaluator groups are no longer supported", response.get_json()["error"])
+
     def test_submission_review_returns_content_without_identity_or_token(self):
         app = create_app({"SECRET_KEY": "test-secret", "TESTING": True})
         connection = ResultsConnection()

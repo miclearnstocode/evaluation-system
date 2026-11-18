@@ -15,8 +15,7 @@ type Cycle = {
 
 type DashboardData = {
   campuses: number;
-  offices: number;
-  administrators: number;
+  targets: number;
   users: number;
   surveys: number;
   cycles: Cycle[];
@@ -31,17 +30,15 @@ export default function AdminDashboardPage() {
     Promise.all([
       apiFetch<{ items: { id: number }[] }>("/api/admin/campuses"),
       apiFetch<{ items: { id: number }[] }>("/api/admin/offices"),
-      apiFetch<{ items: { id: number }[] }>("/api/admin/administrators"),
       apiFetch<{ items: { id: number }[] }>("/api/admin/users"),
       apiFetch<{ items: { id: number }[] }>("/api/admin/surveys"),
       apiFetch<{ items: Cycle[] }>("/api/admin/cycles"),
     ])
-      .then(([campuses, offices, administrators, users, surveys, cycles]) => {
+      .then(([campuses, targets, users, surveys, cycles]) => {
         if (!active) return;
         setData({
           campuses: campuses.items.length,
-          offices: offices.items.length,
-          administrators: administrators.items.length,
+          targets: targets.items.length,
           users: users.items.length,
           surveys: surveys.items.length,
           cycles: cycles.items,
@@ -58,8 +55,7 @@ export default function AdminDashboardPage() {
   const stats = data
     ? [
         { label: "Campuses", value: data.campuses, href: "/admin/campuses" },
-        { label: "Offices", value: data.offices, href: "/admin/offices" },
-        { label: "Administrators", value: data.administrators, href: "/admin/administrators" },
+        { label: "Evaluation targets", value: data.targets, href: "/admin/targets" },
         { label: "User accounts", value: data.users, href: "/admin/users" },
         { label: "Surveys", value: data.surveys, href: "/admin/survey-builder" },
         { label: "Open cycles", value: data.cycles.filter((cycle) => cycle.status === "open").length, href: "/admin/cycles" },

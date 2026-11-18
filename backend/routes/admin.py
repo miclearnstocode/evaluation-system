@@ -197,7 +197,8 @@ def list_offices():
         cursor = conn.cursor(dictionary=True)
         rows = fetch_all(
             cursor,
-            "SELECT tc.id, tc.campus_id, tc.name, tc.target_type AS office_type, tc.active, "
+            "SELECT tc.id, tc.campus_id, tc.name, tc.is_central, "
+            "tc.target_type AS office_type, tc.active, "
             "c.name AS campus_name FROM target_catalog tc "
             "LEFT JOIN campuses c ON c.id = tc.campus_id "
             "ORDER BY c.name, tc.name",
@@ -273,8 +274,7 @@ def list_administrators():
             "tc.target_type FROM target_catalog tc "
             "LEFT JOIN campuses c ON c.id = tc.campus_id "
             "WHERE tc.target_type IN ('campus_administrator', 'satellite_college_director') "
-            "ORDER BY tc.name",
-        )
+            "ORDER BY tc.name",)
         cursor.close()
     return jsonify(items=rows)
 
@@ -363,7 +363,7 @@ def list_users():
         cursor = conn.cursor(dictionary=True)
         rows = fetch_all(
             cursor,
-            "SELECT u.id, u.email, u.role, u.campus_id, u.evaluator_group, u.position_role, "
+            "SELECT u.id, u.email, u.role, u.campus_id, u.position_role, "
             "NULL AS office_unit_code, u.years_of_service, u.is_central_staff, "
             "u.active, c.name AS campus_name, "
             "GROUP_CONCAT(tc.name ORDER BY tc.name SEPARATOR ', ') AS office_unit_name "
@@ -664,9 +664,8 @@ def update_cycle_rules(cycle_id: int):
     for rule in rules:
         if not isinstance(rule, dict) or rule.get("effect") not in {"allow", "deny"}:
             raise ApiError("Each rule needs an allow or deny effect.")
-        group = rule.get("evaluator_group")
-        if group is not None and group not in EVALUATOR_GROUPS:
-            raise ApiError("Invalid evaluator group in eligibility rule.")
+        if "evaluator_group" in rule:
+            raise ApiError("Evaluator groups are no longer supported in eligibility rules.")
         target_central = rule.get("require_target_central", rule.get("target_is_central"))
         same_campus = rule.get("require_same_campus", rule.get("same_campus"))
         for key, value in (
@@ -679,7 +678,6 @@ def update_cycle_rules(cycle_id: int):
         clean.append(
             (
                 rule.get("evaluator_is_central"),
-                group,
                 target_central,
                 same_campus,
                 rule["effect"],
@@ -695,8 +693,8 @@ def update_cycle_rules(cycle_id: int):
         cursor.execute("DELETE FROM eligibility_rules WHERE cycle_id = %s", (cycle_id,))
         cursor.executemany(
             "INSERT INTO eligibility_rules "
-            "(cycle_id, evaluator_is_central, evaluator_group, require_target_central, require_same_campus, action) "
-            "VALUES (%s, %s, %s, %s, %s, %s)",
+            "(cycle_id, evaluator_is_central, require_target_central, require_same_campus, action) "
+            "VALUES (%s, %s, %s, %s, %s)",
             [(cycle_id, *rule) for rule in clean],
         )
         conn.commit()
@@ -771,7 +769,7 @@ def participation_report():
         rules = _load_rules(cursor, cycle_id)
         evaluators = fetch_all(
             cursor,
-            "SELECT id, campus_id, evaluator_group, is_central_staff FROM users "
+            "SELECT id, campus_id, is_central_staff FROM users "
             "WHERE role = 'evaluator' AND active = 1",
         )
         for target in targets:

@@ -7,12 +7,10 @@ class EligibilityTests(unittest.TestCase):
     def setUp(self):
         self.campus_user = {
             "campus_id": 2,
-            "evaluator_group": "student",
             "is_central_staff": 0,
         }
         self.central_user = {
             "campus_id": 1,
-            "evaluator_group": "staff",
             "is_central_staff": 1,
         }
 
@@ -20,7 +18,6 @@ class EligibilityTests(unittest.TestCase):
         rules = [
             {
                 "evaluator_is_central": 0,
-                "evaluator_group": None,
                 "target_is_central": 1,
                 "same_campus": None,
                 "effect": "allow",
@@ -31,7 +28,6 @@ class EligibilityTests(unittest.TestCase):
     def test_campus_users_can_evaluate_own_campus_only_when_rule_allows(self):
         allow_own_campus = {
             "evaluator_is_central": 0,
-            "evaluator_group": None,
             "target_is_central": 0,
             "same_campus": 1,
             "effect": "allow",
@@ -42,7 +38,6 @@ class EligibilityTests(unittest.TestCase):
     def test_central_staff_can_evaluate_central_targets(self):
         rule = {
             "evaluator_is_central": 1,
-            "evaluator_group": None,
             "target_is_central": 1,
             "same_campus": None,
             "effect": "allow",
@@ -53,14 +48,12 @@ class EligibilityTests(unittest.TestCase):
         rules = [
             {
                 "evaluator_is_central": 1,
-                "evaluator_group": None,
                 "target_is_central": None,
                 "same_campus": None,
                 "effect": "allow",
             },
             {
                 "evaluator_is_central": 1,
-                "evaluator_group": None,
                 "target_is_central": 0,
                 "same_campus": None,
                 "effect": "deny",
@@ -71,7 +64,16 @@ class EligibilityTests(unittest.TestCase):
     def test_rule_matching_treats_null_as_wildcard(self):
         rule = {
             "evaluator_is_central": None,
-            "evaluator_group": "student",
+            "target_is_central": None,
+            "same_campus": None,
+            "effect": "allow",
+        }
+        self.assertTrue(rule_matches(rule, self.campus_user, {"campus_id": 7, "is_central": 0}))
+
+    def test_group_field_does_not_filter_eligibility(self):
+        rule = {
+            "evaluator_is_central": None,
+            "evaluator_group": "faculty",
             "target_is_central": None,
             "same_campus": None,
             "effect": "allow",

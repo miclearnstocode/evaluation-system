@@ -3,9 +3,10 @@
 import Link from "next/link";
 import { FormEvent, useEffect, useState } from "react";
 import { apiFetch } from "../lib/api";
+import { TARGET_TYPE_LABELS, type TargetType } from "../lib/targets";
 
 type SelectOption = { value: string; label: string };
-type MembershipOption = { id: number; name: string; unit_code: string };
+type MembershipOption = { id: number; name: string; unit_code: string; target_type: TargetType };
 type RegistrationOptions = {
   position_roles: SelectOption[];
   locations: { code: string; name: string }[];
@@ -58,7 +59,7 @@ export default function RegisterPage() {
   const [optionsError, setOptionsError] = useState("");
   const [loadingOptions, setLoadingOptions] = useState(true);
   const [positionRole, setPositionRole] = useState("");
-  const [selectedOfficeUnitCodes, setSelectedOfficeUnitCodes] = useState<string[]>([]);
+  const [selectedTargetIds, setSelectedTargetIds] = useState<string[]>([]);
   const [locationCode, setLocationCode] = useState("");
   const [yearsOfService, setYearsOfService] = useState("");
   const [email, setEmail] = useState("");
@@ -88,7 +89,7 @@ export default function RegisterPage() {
     };
   }, []);
 
-  const officeUnitChoices = options?.memberships ?? [];
+  const targetChoices = options?.memberships ?? [];
 
   async function handleRegister(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -98,14 +99,14 @@ export default function RegisterPage() {
       setError("The passwords do not match.");
       return;
     }
-    if (positionRole === "non_teaching_staff" && selectedOfficeUnitCodes.length === 0) {
-      setError("Select at least one Office/Unit.");
+    if (positionRole === "non_teaching_staff" && selectedTargetIds.length === 0) {
+      setError("Select at least one evaluation target you belong to.");
       return;
     }
-    if (selectedOfficeUnitCodes.some((code) =>
-      !options?.memberships.some((office) => office.unit_code === code),
+    if (selectedTargetIds.some((targetId) =>
+      !options?.memberships.some((target) => target.unit_code === targetId),
     )) {
-      setError("One of the selected offices is no longer available. Reload the page and try again.");
+      setError("One of the selected targets is no longer available. Reload the page and try again.");
       return;
     }
     setLoading(true);
@@ -117,7 +118,7 @@ export default function RegisterPage() {
           email: normalizedEmail,
           password,
           position_role: positionRole,
-          office_unit_codes: selectedOfficeUnitCodes,
+          office_unit_codes: selectedTargetIds,
           location_code: locationCode,
           years_of_service: yearsOfService,
         }),
@@ -158,7 +159,7 @@ export default function RegisterPage() {
             Create your account
           </h1>
           <p className="mt-3 max-w-2xl text-sm leading-6 text-slate-600">
-            Your role, Office/Unit, and campus determine which evaluation targets are available to you.
+            Your role, target assignments, and campus determine which evaluations are available to you.
             Create an account and sign in immediately. Email verification and administrator approval are not required.
           </p>
         </div>
@@ -204,7 +205,7 @@ export default function RegisterPage() {
                         value={positionRole}
                         onChange={(event) => {
                           setPositionRole(event.target.value);
-                          setSelectedOfficeUnitCodes([]);
+                          setSelectedTargetIds([]);
                         }}
                         required
                         className={fieldClassName}
@@ -217,41 +218,46 @@ export default function RegisterPage() {
                     </div>
                   </div>
 
-                  <fieldset aria-describedby="office-unit-help" className="rounded-xl border border-slate-200 p-4">
+                  <fieldset aria-describedby="target-assignment-help" className="rounded-xl border border-slate-200 p-4">
                     <legend className="px-1 text-sm font-medium text-slate-700">
-                      Which Office/Unit(s) do you belong to?
+                      Which evaluation targets are you assigned to?
                       {positionRole === "non_teaching_staff" && <span className="text-red-500"> *</span>}
                     </legend>
-                    <p id="office-unit-help" className="mb-3 text-xs leading-5 text-slate-500">
-                      Select up to three offices or units. Your position/role is recorded separately.
-                      {positionRole === "non_teaching_staff" && " At least one selection is required for non-teaching staff."}
-                      {` ${selectedOfficeUnitCodes.length} selected.`}
+                    <p id="target-assignment-help" className="mb-3 text-xs leading-5 text-slate-500">
+                      Select up to three targets. Your position/role is recorded separately.
+                      {positionRole === "non_teaching_staff" && " At least one target is required for non-teaching staff."}
+                      {` ${selectedTargetIds.length} selected.`}
                     </p>
                     {!positionRole ? (
                       <p className="text-sm text-slate-500">Choose your position/role first.</p>
-                    ) : officeUnitChoices.length === 0 ? (
-                      <p className="text-sm text-slate-500">No active offices are available for this role.</p>
+                    ) : targetChoices.length === 0 ? (
+                      <p className="text-sm text-slate-500">No active evaluation targets are available.</p>
                     ) : (
                       <div className="grid max-h-72 gap-1 overflow-y-auto sm:grid-cols-2">
-                        {officeUnitChoices.map((office) => {
-                          const checked = selectedOfficeUnitCodes.includes(office.unit_code);
+                        {targetChoices.map((target) => {
+                          const checked = selectedTargetIds.includes(target.unit_code);
                           return (
                             <label
-                              key={office.id}
+                              key={target.id}
                               className="flex cursor-pointer items-start gap-2 rounded-lg px-2.5 py-2 text-sm text-slate-700 hover:bg-slate-50"
                             >
                               <input
                                 type="checkbox"
                                 checked={checked}
-                                disabled={!checked && selectedOfficeUnitCodes.length >= 3}
+                                disabled={!checked && selectedTargetIds.length >= 3}
                                 onChange={(event) => {
-                                  setSelectedOfficeUnitCodes((current) => event.target.checked
-                                    ? [...current, office.unit_code]
-                                    : current.filter((code) => code !== office.unit_code));
+                                  setSelectedTargetIds((current) => event.target.checked
+                                    ? [...current, target.unit_code]
+                                    : current.filter((id) => id !== target.unit_code));
                                 }}
                                 className="mt-0.5 h-4 w-4 shrink-0 accent-[#0F9D8A]"
                               />
-                              <span className="flex-1">{office.name}</span>
+                              <span className="flex-1">
+                                {target.name}
+                                <span className="mt-0.5 block text-xs text-slate-500">
+                                  {TARGET_TYPE_LABELS[target.target_type]}
+                                </span>
+                              </span>
                             </label>
                           );
                         })}
@@ -262,7 +268,7 @@ export default function RegisterPage() {
                   <div className="grid gap-5 sm:grid-cols-2">
                     <div>
                       <label htmlFor="campus-location" className="block text-sm font-medium text-slate-700">
-                        Your Campus or Office Location <span className="text-red-500">*</span>
+                        Your campus or office location <span className="text-red-500">*</span>
                       </label>
                       <select
                         id="campus-location"

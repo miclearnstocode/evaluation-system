@@ -158,24 +158,15 @@ def register():
                 if len(assigned_targets) != len(target_ids):
                     raise ApiError("One of the selected Offices/Units is unavailable.", 409)
 
-            try:
-                evaluator_group = derive_evaluator_group(
-                    position_role,
-                    [target["target_type"] for target in assigned_targets],
-                )
-            except ValueError:
-                raise ApiError("Position/Role and Office/Unit must be a valid combination.") from None
-
             cursor.execute(
                 "INSERT INTO users "
-                "(email, password_hash, role, campus_id, evaluator_group, position_role, "
+                "(email, password_hash, role, campus_id, position_role, "
                 "years_of_service, is_central_staff, active) "
-                "VALUES (%s, %s, 'evaluator', %s, %s, %s, %s, %s, 1)",
+                "VALUES (%s, %s, 'evaluator', %s, %s, %s, %s, 1)",
                 (
                     normalized_email,
                     generate_password_hash(password),
                     campus["id"],
-                    evaluator_group,
                     position_role,
                     years_of_service,
                     campus["is_central"],

@@ -94,7 +94,7 @@ export default function AdminParticipationPage() {
         <table className="w-full text-left text-sm">
           <thead>
             <tr className="bg-slate-50 text-[#1F3A5F]">
-              <th className="px-5 py-4 font-semibold">Office or administrator</th>
+              <th className="px-5 py-4 font-semibold">Evaluation target</th>
               <th className="px-5 py-4 text-right font-semibold">Eligible</th>
               <th className="px-5 py-4 text-right font-semibold">Submitted</th>
               <th className="px-5 py-4 text-right font-semibold">Completion</th>

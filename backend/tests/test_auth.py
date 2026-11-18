@@ -66,6 +66,28 @@ class TargetCursor:
         self.params = params
 
 class RegistrationFlowTests(unittest.TestCase):
+    def test_authenticated_user_lookup_does_not_read_registration_metadata(self):
+        app = create_app({"SECRET_KEY": "test-secret", "TESTING": True})
+        connection = AdminConnection()
+
+        @contextmanager
+        def fake_connection(*args):
+            yield connection
+
+        client = app.test_client()
+        with client.session_transaction() as session:
+            session["user_id"] = 1
+
+        with patch("backend.core.connection", fake_connection):
+            response = client.get("/api/auth/me")
+
+        self.assertEqual(response.status_code, 200)
+        user_query = next(
+            query for query, _ in connection.db_cursor.executed if "FROM users" in query
+        )
+        self.assertNotIn("position_role", user_query)
+        self.assertNotIn("years_of_service", user_query)
+
     def test_registration_creates_active_account_without_email_verification(self):
         app = create_app({"SECRET_KEY": "test-secret", "TESTING": True})
         connection = RegistrationConnection()
@@ -92,11 +114,13 @@ class RegistrationFlowTests(unittest.TestCase):
         self.assertTrue(connection.committed)
         queries = [query for query, _ in connection.db_cursor.executed]
         insert_query = next(query for query in queries if "INSERT INTO users" in query)
-        self.assertIn("VALUES (%s, %s, 'evaluator', %s, %s, %s, %s, %s, 1)", insert_query)
+        self.assertIn("position_role", insert_query)
+        self.assertNotIn("evaluator_group", insert_query)
+        self.assertIn("VALUES (%s, %s, 'evaluator', %s, %s, %s, %s, 1)", insert_query)
         insert_params = next(
             params for query, params in connection.db_cursor.executed if "INSERT INTO users" in query
         )
-        self.assertEqual(insert_params[3], "office_staff")
+        self.assertEqual(insert_params[3], "non_teaching_staff")
         self.assertEqual(
             connection.db_cursor.batch_executed,
             [

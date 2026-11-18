@@ -17,7 +17,6 @@ from werkzeug.exceptions import HTTPException
 from werkzeug.security import check_password_hash, generate_password_hash
 
 if __package__:
-    from .registration import derive_evaluator_group
     from .database import connect as _connect, connection, fetch_all, fetch_one
     from .eligibility import (
         _cycle_user_eligible,
@@ -28,7 +27,6 @@ if __package__:
         rule_matches,
     )
 else:
-    from registration import derive_evaluator_group
     from database import connect as _connect, connection, fetch_all, fetch_one
     from eligibility import (
         _cycle_user_eligible,
@@ -43,7 +41,6 @@ env_file = ".env.production" if os.getenv("APP_ENV") == "production" else ".env"
 load_dotenv(Path(__file__).with_name(env_file))
 
 QUESTION_TYPES = {"scale", "rating", "single_choice", "multi_choice", "yes_no", "text"}
-EVALUATOR_GROUPS = {"faculty", "student_leader", "campus_staff", "office_staff"}
 IDENTIFYING_QUESTION = re.compile(
     r"\b(name|e-?mail|student\s*id|identification\s*(number|no\.?)?|"
     r"id\s*number|date\s*of\s*birth|birthdate|birthday|upload|file\s*attachment)\b",
@@ -250,8 +247,7 @@ def _current_user() -> dict[str, Any] | None:
         cursor = conn.cursor(dictionary=True)
         user = fetch_one(
             cursor,
-            "SELECT id, email, role, campus_id, evaluator_group, position_role, "
-            "years_of_service, is_central_staff, active "
+            "SELECT id, email, role, campus_id, is_central_staff, active "
             "FROM users WHERE id = %s",
             (user_id,),
         )
@@ -394,9 +390,9 @@ def _audit(cursor: Any, user: dict[str, Any], action: str, entity: str, entity_i
 def _insert_default_rules(cursor: Any, cycle_id: int, allow_same_campus: bool) -> None:
     cursor.executemany(
         "INSERT INTO eligibility_rules "
-        "(cycle_id, evaluator_is_central, evaluator_group, require_target_central, require_same_campus, action) "
-        "VALUES (%s, %s, %s, %s, %s, %s)",
-        [(cycle_id, None, None, None, None, "allow")],
+        "(cycle_id, evaluator_is_central, require_target_central, require_same_campus, action) "
+        "VALUES (%s, %s, %s, %s, %s)",
+        [(cycle_id, None, None, None, "allow")],
     )
 
 
@@ -424,4 +420,4 @@ def _date_value(value: Any, field: str) -> datetime:
         parsed = parsed.astimezone(timezone.utc).replace(tzinfo=None)
     return parsed
 
-__all__ = ['logging', 'os', 're', 'uuid', 'contextmanager', 'datetime', 'timedelta', 'timezone', 'wraps', 'Path', 'Any', 'Callable', 'Iterator', 'mysql', 'load_dotenv', 'Flask', 'current_app', 'jsonify', 'request', 'session', 'HTTPException', 'check_password_hash', 'generate_password_hash', 'derive_evaluator_group', 'QUESTION_TYPES', 'EVALUATOR_GROUPS', 'IDENTIFYING_QUESTION', 'CAPSU_EMAIL', 'ApiError', 'SuppressSubmissionAccessLog', '_utcnow_naive', '_is_int', 'validate_questions', 'rule_matches', 'is_eligible', 'validate_survey_payload', '_connect', 'connection', 'fetch_one', 'fetch_all', '_current_user', 'require_role', 'request_user', '_json_body', '_positive_id', '_bool_value', '_cycle_is_open', '_cycle_is_closed', '_load_rules', '_cycle_user_eligible', '_registration_policy_allows', '_load_cycle_target', '_load_survey', '_insert_survey_content', '_audit', '_insert_default_rules', '_insert_all_cycle_targets', '_date_value']
+__all__ = ['logging', 'os', 're', 'uuid', 'contextmanager', 'datetime', 'timedelta', 'timezone', 'wraps', 'Path', 'Any', 'Callable', 'Iterator', 'mysql', 'load_dotenv', 'Flask', 'current_app', 'jsonify', 'request', 'session', 'HTTPException', 'check_password_hash', 'generate_password_hash', 'QUESTION_TYPES', 'IDENTIFYING_QUESTION', 'CAPSU_EMAIL', 'ApiError', 'SuppressSubmissionAccessLog', '_utcnow_naive', '_is_int', 'validate_questions', 'rule_matches', 'is_eligible', 'validate_survey_payload', '_connect', 'connection', 'fetch_one', 'fetch_all', '_current_user', 'require_role', 'request_user', '_json_body', '_positive_id', '_bool_value', '_cycle_is_open', '_cycle_is_closed', '_load_rules', '_cycle_user_eligible', '_registration_policy_allows', '_load_cycle_target', '_load_survey', '_insert_survey_content', '_audit', '_insert_default_rules', '_insert_all_cycle_targets', '_date_value']

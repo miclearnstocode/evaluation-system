@@ -2,8 +2,9 @@
 
 import { FormEvent, useEffect, useState } from "react";
 import { apiFetch } from "../lib/api";
+import { TARGET_TYPE_LABELS, type TargetType } from "../lib/targets";
 
-type CatalogKind = "campuses" | "offices" | "administrators" | "users";
+type CatalogKind = "campuses" | "targets" | "users";
 
 type CatalogRow = {
   id: number;
@@ -11,13 +12,10 @@ type CatalogRow = {
   name?: string;
   email?: string;
   campus_id?: number;
-  campus_name?: string;
-  office_id?: number;
-  office_name?: string;
-  office_type?: string;
-  position?: string | null;
+  campus_name?: string | null;
+  office_type?: TargetType;
+  target_type?: TargetType;
   role?: string;
-  evaluator_group?: string | null;
   position_role?: string | null;
   office_unit_code?: string | null;
   office_unit_name?: string | null;
@@ -34,10 +32,15 @@ type NamedOption = {
 
 const config: Record<CatalogKind, { title: string; path: string }> = {
   campuses: { title: "Campuses", path: "/api/admin/campuses" },
-  offices: { title: "Offices", path: "/api/admin/offices" },
-  administrators: { title: "Administrators", path: "/api/admin/administrators" },
+  targets: { title: "Evaluation Targets", path: "/api/admin/offices" },
   users: { title: "Users", path: "/api/admin/users" },
 };
+
+function normalizeCatalogItems(kind: CatalogKind, rows: CatalogRow[]) {
+  return kind === "targets"
+    ? rows.map((item) => ({ ...item, target_type: item.target_type ?? item.office_type }))
+    : rows;
+}
 
 export default function CatalogPage({ kind }: { kind: CatalogKind }) {
   const { title, path } = config[kind];
@@ -51,11 +54,7 @@ export default function CatalogPage({ kind }: { kind: CatalogKind }) {
   useEffect(() => {
     let active = true;
     const optionPath =
-      kind === "offices" || kind === "users"
-        ? "/api/admin/campuses"
-        : kind === "administrators"
-          ? "/api/admin/offices"
-          : null;
+      kind === "targets" || kind === "users" ? "/api/admin/campuses" : null;
     const optionRequest = optionPath
       ? apiFetch<{ items: NamedOption[] }>(optionPath)
       : Promise.resolve({ items: [] });
@@ -63,7 +62,7 @@ export default function CatalogPage({ kind }: { kind: CatalogKind }) {
     Promise.all([apiFetch<{ items: CatalogRow[] }>(path), optionRequest])
       .then(([list, optionList]) => {
         if (!active) return;
-        setItems(list.items);
+        setItems(normalizeCatalogItems(kind, list.items));
         setOptions(optionList.items);
       })
       .catch((requestError: Error) => {
@@ -80,31 +79,27 @@ export default function CatalogPage({ kind }: { kind: CatalogKind }) {
 
   async function refresh() {
     const result = await apiFetch<{ items: CatalogRow[] }>(path);
-    setItems(result.items);
+    setItems(normalizeCatalogItems(kind, result.items));
   }
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setError("");
     setSaving(true);
-    let body: Record<string, string | number | boolean>;
+    let body: Record<string, string | number | boolean | null>;
     if (kind === "campuses") {
       body = {
         code: form.code ?? "",
         name: form.name ?? "",
         is_central: form.is_central === "true",
       };
-    } else if (kind === "offices") {
+    } else if (kind === "targets") {
       body = {
-        campus_id: Number(form.campus_id),
+        target_type: form.target_type ?? "",
+        code: form.code?.trim() ?? "",
         name: form.name ?? "",
-        office_type: form.office_type ?? "campus_office",
-      };
-    } else if (kind === "administrators") {
-      body = {
-        office_id: Number(form.office_id),
-        name: form.name ?? "",
-        position: form.position ?? "",
+        campus_id: form.campus_id ? Number(form.campus_id) : null,
+        ...(form.is_central ? { is_central: form.is_central === "true" } : {}),
       };
     } else {
       body = {
@@ -165,12 +160,12 @@ export default function CatalogPage({ kind }: { kind: CatalogKind }) {
     );
   }
 
-  function select(name: string, label: string, choices: { value: string; label: string }[]) {
+  function select(name: string, label: string, choices: { value: string; label: string }[], required = true) {
     return (
       <label key={name} className="block text-xs font-semibold text-gray-600">
         {label}
         <select
-          required
+          required={required}
           value={form[name] ?? ""}
           onChange={(event) => setForm((current) => ({ ...current, [name]: event.target.value }))}
           className="mt-1.5 w-full rounded-lg border border-gray-300 bg-white px-3 py-2.5 text-sm font-normal text-gray-800"
@@ -182,28 +177,38 @@ export default function CatalogPage({ kind }: { kind: CatalogKind }) {
     );
   }
 
+  const campusChoices = options.map((item) => ({ value: String(item.id), label: item.name }));
+  const requiredCampusTarget = ["campus_administrator", "satellite_college_director"].includes(form.target_type ?? "");
   const fields =
     kind === "campuses"
       ? [input("code", "Campus code"), input("name", "Campus name"), select("is_central", "Campus type", [{ value: "false", label: "Campus" }, { value: "true", label: "Central" }])]
-      : kind === "offices"
-        ? [select("campus_id", "Campus", options.map((item) => ({ value: String(item.id), label: item.name }))), input("name", "Office name"), select("office_type", "Office type", [{ value: "campus_office", label: "Campus office" }, { value: "central_admin", label: "Central admin" }])]
-        : kind === "administrators"
-          ? [select("office_id", "Office", options.map((item) => ({ value: String(item.id), label: item.name }))), input("name", "Administrator name"), input("position", "Position", false)]
+      : kind === "targets"
+        ? [
+            select("target_type", "Target type", Object.entries(TARGET_TYPE_LABELS).map(([value, label]) => ({ value, label }))),
+            input("name", "Target name"),
+            input("code", "Target code (leave blank to generate)", false),
+            select("campus_id", requiredCampusTarget ? "Campus (required for this target type)" : "Campus (optional)", campusChoices, requiredCampusTarget),
+            select("is_central", "Scope (optional)", [{ value: "true", label: "Central" }, { value: "false", label: "Not central" }], false),
+          ]
           : [input("email", "Super admin email", true, "email"), input("password", "Initial password (at least 12 characters)", true, "password")];
 
   const columns =
     kind === "campuses"
       ? [["Code", "code"], ["Name", "name"], ["Type", "is_central"]]
-      : kind === "offices"
-        ? [["Office", "name"], ["Campus", "campus_name"], ["Type", "office_type"]]
-        : kind === "administrators"
-          ? [["Name", "name"], ["Position", "position"], ["Office", "office_name"], ["Campus", "campus_name"]]
-          : [["Email", "email"], ["Position/Role", "position_role"], ["Office/Unit", "office_unit_name"], ["Campus", "campus_name"], ["Years of Service / Stay", "years_of_service"]];
+      : kind === "targets"
+        ? [["Target", "name"], ["Type", "target_type"], ["Campus / Scope", "campus_name"]]
+        : [["Email", "email"], ["Position/Role", "position_role"], ["Assigned targets", "office_unit_name"], ["Campus", "campus_name"], ["Years of Service / Stay", "years_of_service"]];
 
   function displayValue(item: CatalogRow, key: string) {
     if (key === "is_central") return item.is_central ? "Central" : "Campus";
     if (key === "is_central_staff") return item.is_central_staff ? "Yes" : "No";
-    if (key === "office_type") return item.office_type === "central_admin" ? "Central admin" : "Campus office";
+    if (key === "target_type") {
+      const targetType = item.target_type ?? item.office_type;
+      return targetType ? TARGET_TYPE_LABELS[targetType] : "—";
+    }
+    if (key === "campus_name" && kind === "targets") {
+      return item.campus_name ?? (item.is_central ? "Central" : "University-wide");
+    }
     if (key === "position_role") {
       return ({
         teaching_faculty: "Teaching / Faculty",
@@ -230,10 +235,15 @@ export default function CatalogPage({ kind }: { kind: CatalogKind }) {
                   Evaluator accounts are active immediately after registration. Delete accounts that are no longer affiliated with CAPSU; deletion also retracts their submissions and comments.
                 </p>
               )}
+              {kind === "targets" && (
+                <p className="text-sm text-gray-600">
+                  Manage the six target categories evaluated in each cycle. Campus Administrators and Satellite College Directors must be linked to a campus.
+                </p>
+              )}
               <form onSubmit={submit} className="grid gap-4 rounded-xl border border-gray-200 bg-white p-5 sm:grid-cols-2 lg:grid-cols-3">
                 {fields}
                 <button disabled={saving} className="self-end rounded-lg bg-[#0F9D8A] px-5 py-2.5 text-sm font-semibold text-white disabled:opacity-70">
-                  {saving ? "Saving…" : `Add ${kind === "administrators" ? "administrator" : kind.slice(0, -1)}`}
+                  {saving ? "Saving…" : kind === "targets" ? "Add target" : `Add ${kind.slice(0, -1)}`}
                 </button>
               </form>
               {error && <p role="alert" className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</p>}

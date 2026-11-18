@@ -2,9 +2,10 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { apiFetch } from "../../lib/api";
+import { getTargetLocationLabel, TARGET_TYPE_LABELS, type TargetType } from "../../lib/targets";
 
 type Cycle = { id: number; name: string; status: string; target_ids: number[] };
-type Target = { id: number; name: string; target_type: "office" | "administrator"; campus_name: string };
+type Target = { id: number; name: string; target_type: TargetType; campus_name: string | null; is_central: boolean | number };
 type Distribution = { value: number; label: string; count: number };
 type ResultQuestion = {
   id: number;
@@ -140,7 +141,7 @@ export default function AdminResultsPage() {
           </select>
         </label>
         <label className="text-sm font-medium text-slate-700">
-          Office or administrator
+          Evaluation target
           <select
             value={targetId}
             onChange={(event) => {
@@ -155,7 +156,7 @@ export default function AdminResultsPage() {
             <option value="">Select a target</option>
             {availableTargets.map((target) => (
               <option key={target.id} value={target.id}>
-                {target.name} — {target.campus_name}
+                {TARGET_TYPE_LABELS[target.target_type]}: {target.name} — {getTargetLocationLabel(target.campus_name, Boolean(target.is_central))}
               </option>
             ))}
           </select>

@@ -2,9 +2,10 @@
 
 import { FormEvent, useEffect, useState } from "react";
 import { apiFetch } from "../../lib/api";
+import { TARGET_TYPE_LABELS, type TargetType } from "../../lib/targets";
 
 type Survey = { id: number; title: string; status: string };
-type Cycle = { id: number; name: string; survey_title: string; target_type: "office" | "administrator" | "all"; opens_at: string; closes_at: string; status: string; target_ids: number[] };
+type Cycle = { id: number; name: string; survey_title: string; target_type: TargetType | "all"; opens_at: string; closes_at: string; status: string; target_ids: number[] };
 
 export default function AdminCyclesPage() {
   const [surveys, setSurveys] = useState<Survey[]>([]);
@@ -83,7 +84,7 @@ export default function AdminCyclesPage() {
         <div>
           <h1 className="text-2xl font-bold text-[#1F3A5F]">Evaluation Cycles</h1>
           <p className="mt-1 text-sm text-gray-500">
-            Each survey cycle includes all active offices and administrators. Evaluators only see targets they are eligible to evaluate.
+            Each survey cycle includes all active evaluation targets. Evaluators only see targets they are eligible to evaluate.
           </p>
         </div>
         {error && <p role="alert" className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</p>}
@@ -123,7 +124,7 @@ export default function AdminCyclesPage() {
                   <td className="px-5 py-4 font-medium">{cycle.name}</td>
                   <td className="px-5 py-4">{cycle.survey_title}</td>
                   <td className="px-5 py-4 capitalize">
-                    {cycle.target_type === "all" ? "Offices and administrators" : `${cycle.target_type}s`}
+                    {cycle.target_type === "all" ? "All target categories" : TARGET_TYPE_LABELS[cycle.target_type]}
                   </td>
                   <td className="px-5 py-4">{new Date(cycle.opens_at).toLocaleString()} – {new Date(cycle.closes_at).toLocaleString()}</td>
                   <td className="px-5 py-4">{cycle.target_ids.length}</td>

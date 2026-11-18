@@ -2,36 +2,9 @@ import unittest
 from unittest.mock import patch
 
 from backend.eligibility import _registration_policy_allows
-from backend.registration import derive_evaluator_group
 
 
 class RegistrationProfileTests(unittest.TestCase):
-    def test_role_and_target_types_determine_evaluator_group(self):
-        self.assertEqual(derive_evaluator_group("teaching_faculty", []), "faculty")
-        self.assertEqual(derive_evaluator_group("student_leader", []), "student_leader")
-        self.assertEqual(
-            derive_evaluator_group("non_teaching_staff", ["campus_administrator"]),
-            "campus_staff",
-        )
-        self.assertEqual(
-            derive_evaluator_group(
-                "non_teaching_staff",
-                ["campus_administrator", "satellite_college_director"],
-            ),
-            "campus_staff",
-        )
-        self.assertEqual(derive_evaluator_group("non_teaching_staff", ["director"]), "office_staff")
-        self.assertEqual(
-            derive_evaluator_group("non_teaching_staff", ["campus_administrator", "director"]),
-            "office_staff",
-        )
-
-    def test_non_teaching_role_requires_an_assignment(self):
-        with self.assertRaises(ValueError):
-            derive_evaluator_group("non_teaching_staff", [])
-        with self.assertRaises(ValueError):
-            derive_evaluator_group("other_role", ["director"])
-
     def test_evaluator_cannot_evaluate_a_target_they_are_assigned_to(self):
         user = {"id": 8}
         target = {"id": 14}

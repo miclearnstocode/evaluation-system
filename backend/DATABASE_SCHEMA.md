@@ -71,7 +71,7 @@ the DDL enforces the type/reference match and each reference has a foreign key.
 | `rde_directors` | Research, Development, and Extension director targets. |
 | `rde_center_directors` | Director targets for individual RDE centers. |
 | `targets` | Common evaluation target registry. A target points to exactly one of the six target-specific tables, with optional campus, central, and active flags. Cycles, assignments, participation, and aggregate results reference it. |
-| `users` | Super-admin and evaluator accounts, authentication, campus, evaluator group, registration role, service range, and active status. |
+| `users` | Super-admin and evaluator accounts, authentication, campus, registration role, service range, and active status. |
 | `user_office_assignments` | Many-to-many links between users and targets, with `head` or `member` assignment role. An evaluator is not eligible to evaluate a target to which they are assigned. |
 
 ### Surveys and evaluation setup
@@ -84,7 +84,7 @@ the DDL enforces the type/reference match and each reference has a foreign key.
 | `question_options` | Ordered choices and their scoring points for choice questions. `option_key` is unique within a question. |
 | `eval_cycles` | Survey schedule, open/close times, status, response threshold, same-campus setting, and target category (or all categories). |
 | `cycle_targets` | Join table selecting targets for cycles. Its composite primary key prevents duplicate assignments. |
-| `eligibility_rules` | Allow/deny rules by evaluator group, evaluator central status, target central status, and same-campus status. |
+| `eligibility_rules` | Allow/deny rules by evaluator central status, target central status, and same-campus status. |
 
 ### Participation, answers, and results
 

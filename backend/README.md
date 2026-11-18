@@ -47,8 +47,7 @@ The **Office Being Evaluated** list contains eligible targets in an open evaluat
 - `app.py` creates the Flask app and installs middleware.
 - `routes/auth.py`, `routes/admin.py`, and `routes/evaluator.py` handle their respective HTTP endpoints.
 - `database.py` owns MySQL connections and query helpers.
-- `eligibility.py` applies cycle rules and profile-based target eligibility.
-- `registration.py` derives evaluator groups from the selected role and target assignments.
+- `eligibility.py` applies cycle rules, campus/central conditions, and assigned-target self-evaluation exclusion.
 - `core.py` provides shared validation and API helpers to route modules.
 
 ## API groups
@@ -73,7 +72,7 @@ The admin database account needs the permissions required by admin endpoints, in
 
 Survey scoring is configurable: scale/rating and Yes answers use the selected value multiplied by the question weight; choice questions use configured option points; text answers are unscored. Section scores are summed for the total, and the mean is the total divided by the number of sections.
 
-The survey builder creates question sets only. Evaluation cycles can include every active target, with eligibility controlled by cycle rules, campus, central status, evaluator role, and target assignments.
+The survey builder creates question sets only. Evaluation cycles can include every active target. Eligibility is controlled by cycle rules, campus/central conditions, and assigned-target self-evaluation exclusion; evaluator groups are not used.
 
 Disable access/request logging for `/api/evaluator/submit` at every production proxy and server layer, and do not log its body, IP, user agent, or authenticated user. Restrict MySQL logs and backups. These controls reduce linkage but do not prevent timing correlation by a fully privileged server or database operator. Individual results are released after the first response as configured; free-text answers may identify their author by content, so email addresses are redacted before results are returned.
 

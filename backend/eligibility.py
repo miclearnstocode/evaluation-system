@@ -10,8 +10,7 @@ else:
 
 def rule_matches(rule: dict[str, Any], user: dict[str, Any], target: dict[str, Any]) -> bool:
     checks = (
-        ("evaluator_is_central", bool(user.get("is_central_staff"))),
-        ("evaluator_group", user.get("evaluator_group")),
+        (rule.get("evaluator_is_central"), bool(user.get("is_central_staff"))),
         (
             rule.get("require_target_central", rule.get("target_is_central")),
             bool(target.get("is_central")),
@@ -21,10 +20,7 @@ def rule_matches(rule: dict[str, Any], user: dict[str, Any], target: dict[str, A
             user.get("campus_id") == target.get("campus_id"),
         ),
     )
-    return (
-        all(rule.get(field) is None or rule[field] == actual for field, actual in checks[:2])
-        and all(expected is None or expected == actual for expected, actual in checks[2:])
-    )
+    return all(expected is None or expected == actual for expected, actual in checks)
 
 
 def is_eligible(user: dict[str, Any], target: dict[str, Any], rules: list[dict[str, Any]]) -> bool:
@@ -37,7 +33,7 @@ def is_eligible(user: dict[str, Any], target: dict[str, Any], rules: list[dict[s
 def _load_rules(cursor: Any, cycle_id: int) -> list[dict[str, Any]]:
     return fetch_all(
         cursor,
-        "SELECT evaluator_is_central, evaluator_group, require_target_central, "
+        "SELECT evaluator_is_central, require_target_central, "
         "require_same_campus, action FROM eligibility_rules WHERE cycle_id = %s",
         (cycle_id,),
     )
