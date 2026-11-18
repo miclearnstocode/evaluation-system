@@ -23,11 +23,12 @@ class RegistrationCursor:
         raise AssertionError(f"Unexpected query: {self.query}")
 
     def fetchall(self):
-        if "FROM target_catalog" in self.query:
-            return [
-                {"id": 2, "code": "VP_ACADEMIC", "target_type": "vice_president"},
-                {"id": 3, "code": "BAC", "target_type": "director"},
-            ]
+        if "FROM `campus_administrators`" in self.query:
+            return [{"code": "2"}]
+        if "FROM `satellite_college_directors`" in self.query:
+            return [{"code": "3"}]
+        if "SELECT code FROM" in self.query:
+            return []
         raise AssertionError(f"Unexpected query: {self.query}")
 
     def executemany(self, query, params):
@@ -102,6 +103,8 @@ class RegistrationFlowTests(unittest.TestCase):
                 json={
                     "email": "evaluator@capsu.edu.ph",
                     "password": "secure-password-123",
+                    "first_name": " Ada ",
+                    "last_name": " Lovelace ",
                     "position_role": "non_teaching_staff",
                     "office_unit_codes": ["2", "3"],
                     "location_code": "MAIN",
@@ -115,12 +118,14 @@ class RegistrationFlowTests(unittest.TestCase):
         queries = [query for query, _ in connection.db_cursor.executed]
         insert_query = next(query for query in queries if "INSERT INTO users" in query)
         self.assertIn("position_role", insert_query)
+        self.assertIn("first_name, last_name", insert_query)
         self.assertNotIn("evaluator_group", insert_query)
-        self.assertIn("VALUES (%s, %s, 'evaluator', %s, %s, %s, %s, 1)", insert_query)
+        self.assertIn("VALUES (%s, %s, %s, %s, 'evaluator', %s, %s, %s, %s, 1)", insert_query)
         insert_params = next(
             params for query, params in connection.db_cursor.executed if "INSERT INTO users" in query
         )
-        self.assertEqual(insert_params[3], "non_teaching_staff")
+        self.assertEqual(insert_params[2:4], ("Ada", "Lovelace"))
+        self.assertEqual(insert_params[5], "non_teaching_staff")
         self.assertEqual(
             connection.db_cursor.batch_executed,
             [
@@ -139,6 +144,8 @@ class RegistrationFlowTests(unittest.TestCase):
             json={
                 "email": "evaluator@capsu.edu.ph",
                 "password": "secure-password-123",
+                "first_name": "Ada",
+                "last_name": "Lovelace",
                 "position_role": "non_teaching_staff",
                 "office_unit_codes": ["BAC", "BAC"],
                 "location_code": "MAIN",
@@ -148,6 +155,75 @@ class RegistrationFlowTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 400)
         self.assertIn("cannot be selected more than once", response.get_json()["error"])
+
+    def test_registration_requires_names_within_column_length(self):
+        app = create_app({"SECRET_KEY": "test-secret", "TESTING": True})
+        valid_payload = {
+            "email": "evaluator@capsu.edu.ph",
+            "password": "secure-password-123",
+            "first_name": "Ada",
+            "last_name": "Lovelace",
+            "position_role": "teaching_faculty",
+            "office_unit_codes": [],
+            "location_code": "MAIN",
+            "years_of_service": "1_5",
+        }
+
+        for field, value in (("first_name", " "), ("last_name", "L" * 101)):
+            with self.subTest(field=field):
+                payload = {**valid_payload, field: value}
+                response = app.test_client().post("/api/auth/register", json=payload)
+
+                self.assertEqual(response.status_code, 400)
+                self.assertIn("First and last name", response.get_json()["error"])
+
+    def test_student_leader_registration_does_not_require_years_of_service(self):
+        app = create_app({"SECRET_KEY": "test-secret", "TESTING": True})
+        connection = RegistrationConnection()
+
+        @contextmanager
+        def fake_connection(*args):
+            yield connection
+
+        with patch("backend.routes.auth.connection", fake_connection):
+            response = app.test_client().post(
+                "/api/auth/register",
+                json={
+                    "email": "leader@capsu.edu.ph",
+                    "password": "secure-password-123",
+                    "first_name": "Ada",
+                    "last_name": "Lovelace",
+                    "position_role": "student_leader",
+                    "office_unit_codes": [],
+                    "location_code": "MAIN",
+                },
+            )
+
+        self.assertEqual(response.status_code, 201)
+        insert_params = next(
+            params
+            for query, params in connection.db_cursor.executed
+            if "INSERT INTO users" in query
+        )
+        self.assertIsNone(insert_params[6])
+
+    def test_other_roles_still_require_years_of_service(self):
+        app = create_app({"SECRET_KEY": "test-secret", "TESTING": True})
+        response = app.test_client().post(
+            "/api/auth/register",
+            json={
+                "email": "faculty@capsu.edu.ph",
+                "password": "secure-password-123",
+                "first_name": "Ada",
+                "last_name": "Lovelace",
+                "position_role": "teaching_faculty",
+                "office_unit_codes": [],
+                "location_code": "MAIN",
+            },
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("valid years of service", response.get_json()["error"])
 
     def test_cycle_automatically_includes_all_active_targets(self):
         cursor = TargetCursor()

@@ -6,18 +6,22 @@ import { apiFetch } from "../lib/api";
 import { TARGET_TYPE_LABELS, type TargetType } from "../lib/targets";
 
 type SelectOption = { value: string; label: string };
-type MembershipOption = { id: number; name: string; unit_code: string; target_type: TargetType };
+type MembershipOption = { id: string; name: string; unit_code: string; target_type: TargetType };
 type RegistrationOptions = {
   position_roles: SelectOption[];
   locations: { code: string; name: string }[];
   service_years: SelectOption[];
   memberships: MembershipOption[];
+  role_memberships: MembershipOption[];
 };
 
 const fieldClassName =
   "mt-1.5 w-full rounded-lg border border-slate-300 bg-white px-3.5 py-2.5 text-sm text-slate-900 outline-none transition focus:border-teal-600 focus:ring-4 focus:ring-teal-600/10 disabled:bg-slate-100";
 
-// Eye icon (visible) and eye-off icon (hidden) — inline SVGs so no extra dependency is needed.
+function targetTypeLabel(targetType: string): string {
+  return (TARGET_TYPE_LABELS as Record<string, string>)[targetType] ?? targetType;
+}
+
 function EyeIcon({ open }: { open: boolean }) {
   return open ? (
     <svg
@@ -62,6 +66,8 @@ export default function RegisterPage() {
   const [selectedTargetIds, setSelectedTargetIds] = useState<string[]>([]);
   const [locationCode, setLocationCode] = useState("");
   const [yearsOfService, setYearsOfService] = useState("");
+  const [firstName, setFirstName] = useState("");
+  const [lastName, setLastName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
@@ -74,9 +80,16 @@ export default function RegisterPage() {
 
   useEffect(() => {
     let active = true;
-    apiFetch<RegistrationOptions>("/api/auth/registration-options")
+    const url = positionRole
+      ? `/api/auth/registration-options?position_role=${encodeURIComponent(positionRole)}`
+      : "/api/auth/registration-options";
+    setLoadingOptions(true);
+    apiFetch<RegistrationOptions>(url)
       .then((data) => {
-        if (active) setOptions(data);
+        if (active) {
+          setOptions(data);
+          setOptionsError("");
+        }
       })
       .catch((requestError: Error) => {
         if (active) setOptionsError(requestError.message);
@@ -87,9 +100,10 @@ export default function RegisterPage() {
     return () => {
       active = false;
     };
-  }, []);
+  }, [positionRole]);
 
-  const targetChoices = options?.memberships ?? [];
+  // The backend decides which offices/units are available per role.
+  const targetChoices = options?.role_memberships ?? [];
 
   async function handleRegister(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -99,16 +113,31 @@ export default function RegisterPage() {
       setError("The passwords do not match.");
       return;
     }
-    if (positionRole === "non_teaching_staff" && selectedTargetIds.length === 0) {
-      setError("Select at least one evaluation target you belong to.");
+
+    const rolesRequiringTarget = [
+      "non_teaching_staff",
+      "campus_administrator_satellite_director",
+      "director",
+      "student_leader",
+      "teaching_faculty",
+    ];
+
+    if (rolesRequiringTarget.includes(positionRole) && selectedTargetIds.length === 0) {
+      setError("Select at least one office/unit you belong to.");
       return;
     }
-    if (selectedTargetIds.some((targetId) =>
-      !options?.memberships.some((target) => target.unit_code === targetId),
-    )) {
-      setError("One of the selected targets is no longer available. Reload the page and try again.");
+
+    if (
+      selectedTargetIds.some(
+        (targetId) => !targetChoices.some((target) => target.unit_code === targetId),
+      )
+    ) {
+      setError(
+        "One of the selected targets is no longer available for your role. Reload the page and try again.",
+      );
       return;
     }
+
     setLoading(true);
     try {
       const normalizedEmail = email.trim().toLowerCase();
@@ -117,16 +146,22 @@ export default function RegisterPage() {
         body: JSON.stringify({
           email: normalizedEmail,
           password,
+          first_name: firstName.trim(),
+          last_name: lastName.trim(),
           position_role: positionRole,
           office_unit_codes: selectedTargetIds,
           location_code: locationCode,
-          years_of_service: yearsOfService,
+          years_of_service: positionRole === "student_leader" ? null : yearsOfService,
         }),
       });
       setRegistered(true);
       setNotice("Your account is active. You can sign in now.");
     } catch (requestError) {
-      setError(requestError instanceof Error ? requestError.message : "Registration could not be completed.");
+      setError(
+        requestError instanceof Error
+          ? requestError.message
+          : "Registration could not be completed.",
+      );
     } finally {
       setLoading(false);
     }
@@ -197,6 +232,39 @@ export default function RegisterPage() {
                 <>
                   <div className="grid gap-5 sm:grid-cols-2">
                     <div>
+                      <label htmlFor="first-name" className="block text-sm font-medium text-slate-700">
+                        First name <span className="text-red-500">*</span>
+                      </label>
+                      <input
+                        id="first-name"
+                        type="text"
+                        autoComplete="given-name"
+                        maxLength={100}
+                        value={firstName}
+                        onChange={(event) => setFirstName(event.target.value)}
+                        required
+                        className={fieldClassName}
+                      />
+                    </div>
+                    <div>
+                      <label htmlFor="last-name" className="block text-sm font-medium text-slate-700">
+                        Last name <span className="text-red-500">*</span>
+                      </label>
+                      <input
+                        id="last-name"
+                        type="text"
+                        autoComplete="family-name"
+                        maxLength={100}
+                        value={lastName}
+                        onChange={(event) => setLastName(event.target.value)}
+                        required
+                        className={fieldClassName}
+                      />
+                    </div>
+                  </div>
+
+                  <div className="grid gap-5 sm:grid-cols-2">
+                    <div>
                       <label htmlFor="position-role" className="block text-sm font-medium text-slate-700">
                         Your Position/Role <span className="text-red-500">*</span>
                       </label>
@@ -205,7 +273,10 @@ export default function RegisterPage() {
                         value={positionRole}
                         onChange={(event) => {
                           setPositionRole(event.target.value);
-                          setSelectedTargetIds([]);
+                          setSelectedTargetIds([]); // Reset selections when role changes
+                          if (event.target.value === "student_leader") {
+                            setYearsOfService("");
+                          }
                         }}
                         required
                         className={fieldClassName}
@@ -220,18 +291,24 @@ export default function RegisterPage() {
 
                   <fieldset aria-describedby="target-assignment-help" className="rounded-xl border border-slate-200 p-4">
                     <legend className="px-1 text-sm font-medium text-slate-700">
-                      Which evaluation targets are you assigned to?
-                      {positionRole === "non_teaching_staff" && <span className="text-red-500"> *</span>}
+                      Which Office/Unit do you belong? <span className="text-red-500">* Check all that apply.</span>
                     </legend>
                     <p id="target-assignment-help" className="mb-3 text-xs leading-5 text-slate-500">
-                      Select up to three targets. Your position/role is recorded separately.
-                      {positionRole === "non_teaching_staff" && " At least one target is required for non-teaching staff."}
+                      {positionRole === "non_teaching_staff" ||
+                      positionRole === "campus_administrator_satellite_director" ||
+                      positionRole === "director" ||
+                      positionRole === "student_leader" ||
+                      positionRole === "teaching_faculty"
+                        ? "At least one office/unit is required for your role. "
+                        : ""}
                       {` ${selectedTargetIds.length} selected.`}
                     </p>
                     {!positionRole ? (
                       <p className="text-sm text-slate-500">Choose your position/role first.</p>
+                    ) : loadingOptions ? (
+                      <p className="text-sm text-slate-500">Loading available offices/units…</p>
                     ) : targetChoices.length === 0 ? (
-                      <p className="text-sm text-slate-500">No active evaluation targets are available.</p>
+                      <p className="text-sm text-slate-500">No active evaluation targets are available for your role.</p>
                     ) : (
                       <div className="grid max-h-72 gap-1 overflow-y-auto sm:grid-cols-2">
                         {targetChoices.map((target) => {
@@ -244,18 +321,19 @@ export default function RegisterPage() {
                               <input
                                 type="checkbox"
                                 checked={checked}
-                                disabled={!checked && selectedTargetIds.length >= 3}
                                 onChange={(event) => {
-                                  setSelectedTargetIds((current) => event.target.checked
-                                    ? [...current, target.unit_code]
-                                    : current.filter((id) => id !== target.unit_code));
+                                  setSelectedTargetIds((current) =>
+                                    event.target.checked
+                                      ? [...current, target.unit_code]
+                                      : current.filter((id) => id !== target.unit_code),
+                                  );
                                 }}
                                 className="mt-0.5 h-4 w-4 shrink-0 accent-[#0F9D8A]"
                               />
                               <span className="flex-1">
                                 {target.name}
                                 <span className="mt-0.5 block text-xs text-slate-500">
-                                  {TARGET_TYPE_LABELS[target.target_type]}
+                                  {targetTypeLabel(target.target_type)}
                                 </span>
                               </span>
                             </label>
@@ -266,7 +344,7 @@ export default function RegisterPage() {
                   </fieldset>
 
                   <div className="grid gap-5 sm:grid-cols-2">
-                    <div>
+                    <div className={positionRole === "student_leader" ? "sm:col-span-2" : ""}>
                       <label htmlFor="campus-location" className="block text-sm font-medium text-slate-700">
                         Your campus or office location <span className="text-red-500">*</span>
                       </label>
@@ -283,23 +361,25 @@ export default function RegisterPage() {
                         ))}
                       </select>
                     </div>
-                    <div>
-                      <label htmlFor="years-of-service" className="block text-sm font-medium text-slate-700">
-                        Years of Service / Stay in CAPSU <span className="text-red-500">*</span>
-                      </label>
-                      <select
-                        id="years-of-service"
-                        value={yearsOfService}
-                        onChange={(event) => setYearsOfService(event.target.value)}
-                        required
-                        className={fieldClassName}
-                      >
-                        <option value="">Choose a range</option>
-                        {options.service_years.map((option) => (
-                          <option key={option.value} value={option.value}>{option.label}</option>
-                        ))}
-                      </select>
-                    </div>
+                    {positionRole !== "student_leader" && (
+                      <div>
+                        <label htmlFor="years-of-service" className="block text-sm font-medium text-slate-700">
+                          Years of Service / Stay in CAPSU <span className="text-red-500">*</span>
+                        </label>
+                        <select
+                          id="years-of-service"
+                          value={yearsOfService}
+                          onChange={(event) => setYearsOfService(event.target.value)}
+                          required
+                          className={fieldClassName}
+                        >
+                          <option value="">Choose a range</option>
+                          {options.service_years.map((option) => (
+                            <option key={option.value} value={option.value}>{option.label}</option>
+                          ))}
+                        </select>
+                      </div>
+                    )}
                   </div>
 
                   <div>

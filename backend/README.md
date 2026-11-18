@@ -38,7 +38,7 @@ Run `npm run build` from the repository root. Next.js writes the static site to 
 
 The static frontend does not host the Flask API. Configure Bluehost or your API host to serve `/api/*` at `https://gsu.capsu.edu.ph`, or set `NEXT_PUBLIC_API_BASE_URL` in `.env.production` to the actual API origin before building. The API's `FRONTEND_ORIGINS` must include `https://gsu.capsu.edu.ph`.
 
-Visit `/register` or select **Create evaluator account** on the sign-in page. Registration is limited to `@capsu.edu.ph` addresses and activates the account immediately. Choose the role, up to three target assignments, campus/location, and service range. Role and service-range choices are provided by the backend; active campuses and targets come from the database. Assignments are stored in `user_office_assignments`.
+Visit `/register` or select **Create evaluator account** on the sign-in page. Registration is limited to `@capsu.edu.ph` addresses and activates the account immediately. Enter your first and last name, then choose the role, up to three target assignments, campus/location, and service range. Names are saved to the `users` table. Role and service-range choices are provided by the backend; active campuses and targets come from the database. Assignments are stored in `user_office_assignments`.
 
 The **Office Being Evaluated** list contains eligible targets in an open evaluation cycle. Create and publish a question survey, then open a cycle to include all active targets from the six target categories.
 
