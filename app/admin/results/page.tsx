@@ -13,7 +13,17 @@ type ResultQuestion = {
   mean: number | null;
   distribution: Distribution[];
 };
-type IndividualAnswer = { question: string; answer: number | string | string[] };
+type IndividualAnswer = {
+  question: string;
+  answer: number | string | string[];
+  score: number | null;
+};
+type IndividualResponse = {
+  answers: IndividualAnswer[];
+  total_score?: number;
+  mean_score?: number;
+  section_scores?: { section_id: number; title: string; score: number }[];
+};
 type Results = {
   released: boolean;
   minimum: number;
@@ -21,7 +31,7 @@ type Results = {
   cycle?: { id: number; name: string };
   target?: { id: number; name: string };
   questions?: ResultQuestion[];
-  individual_responses?: { answers: IndividualAnswer[] }[];
+  individual_responses?: IndividualResponse[];
 };
 
 export default function AdminResultsPage() {
@@ -222,12 +232,35 @@ export default function AdminResultsPage() {
               {results.individual_responses.map((response, index) => (
                 <article key={index} className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
                   <h3 className="font-semibold text-[#1F3A5F]">Anonymous response {index + 1}</h3>
+                  {response.total_score !== undefined && (
+                    <div className="mt-3 rounded-lg bg-teal-50 p-4 text-sm text-teal-950">
+                      <p className="font-semibold">
+                        Total: {response.total_score.toFixed(2)} points
+                        <span className="mx-2 text-teal-700">·</span>
+                        Mean per section: {response.mean_score?.toFixed(2) ?? "0.00"}
+                      </p>
+                      {!!response.section_scores?.length && (
+                        <ul className="mt-2 flex flex-wrap gap-x-5 gap-y-1 text-teal-900">
+                          {response.section_scores.map((section) => (
+                            <li key={section.section_id}>
+                              {section.title}: {section.score.toFixed(2)}
+                            </li>
+                          ))}
+                        </ul>
+                      )}
+                    </div>
+                  )}
                   <dl className="mt-3 divide-y divide-slate-100">
                     {response.answers.map((answer, answerIndex) => (
                       <div key={`${answer.question}-${answerIndex}`} className="grid gap-1 py-3 sm:grid-cols-[minmax(12rem,1fr)_2fr] sm:gap-4">
                         <dt className="text-sm font-medium text-slate-600">{answer.question}</dt>
                         <dd className="whitespace-pre-wrap text-sm text-slate-800">
                           {Array.isArray(answer.answer) ? answer.answer.join(", ") : answer.answer}
+                          {answer.score !== null && answer.score !== undefined && (
+                            <span className="mt-1 block text-xs font-medium text-teal-800">
+                              Score: {answer.score.toFixed(2)} points
+                            </span>
+                          )}
                         </dd>
                       </div>
                     ))}

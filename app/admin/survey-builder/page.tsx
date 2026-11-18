@@ -4,12 +4,14 @@ import { FormEvent, useEffect, useState } from "react";
 import { apiFetch } from "../../lib/api";
 
 type QuestionType = "scale" | "rating" | "single_choice" | "multi_choice" | "yes_no" | "text";
+type ChoiceDraft = { label: string; points: number };
 type QuestionDraft = {
   id: string;
   text: string;
   type: QuestionType;
   required: boolean;
-  options: string[];
+  options: ChoiceDraft[];
+  scoreWeight: number;
   scaleMin: number;
   scaleMax: number;
   minLabel: string;
@@ -30,7 +32,8 @@ type SurveyDetail = Survey & {
       question_text: string;
       type: QuestionType;
       required: boolean;
-      options: { label: string }[];
+      options: { label: string; points: number | string }[];
+      score_weight: number | string;
       scale_min: number | null;
       scale_max: number | null;
       min_label: string | null;
@@ -48,7 +51,8 @@ function createQuestion(): QuestionDraft {
     text: "",
     type: "scale",
     required: false,
-    options: ["Option 1", "Option 2"],
+    options: [{ label: "Option 1", points: 1 }, { label: "Option 2", points: 1 }],
+    scoreWeight: 1,
     scaleMin: 1,
     scaleMax: 5,
     minLabel: "",
@@ -69,7 +73,8 @@ function initialSections(): SectionDraft[] {
       text: "",
       type: "scale",
       required: false,
-      options: ["Option 1", "Option 2"],
+      options: [{ label: "Option 1", points: 1 }, { label: "Option 2", points: 1 }],
+      scoreWeight: 1,
       scaleMin: 1,
       scaleMax: 5,
       minLabel: "",
@@ -86,6 +91,24 @@ const questionTypes: { value: QuestionType; label: string }[] = [
   { value: "yes_no", label: "Yes / No" },
   { value: "text", label: "Paragraph" },
 ];
+
+function questionMaximumScore(question: QuestionDraft): number {
+  if (question.type === "scale" || question.type === "rating") {
+    return question.scaleMax * question.scoreWeight;
+  }
+  if (question.type === "yes_no") return question.scoreWeight;
+  if (question.type === "single_choice") {
+    return Math.max(0, ...question.options.map((option) => option.points));
+  }
+  if (question.type === "multi_choice") {
+    return question.options.reduce((total, option) => total + option.points, 0);
+  }
+  return 0;
+}
+
+function displayScore(value: number): string {
+  return Number(value.toFixed(2)).toString();
+}
 
 function SurveyPreview({
   title,
@@ -122,7 +145,7 @@ function SurveyPreview({
                   {question.options.map((option, optionIndex) => (
                     <label key={`${question.id}-preview-${optionIndex}`} className="flex items-center gap-3 text-sm text-slate-700">
                       <input type={question.type === "single_choice" ? "radio" : "checkbox"} disabled />
-                      {option || `Option ${optionIndex + 1}`}
+                      {option.label || `Option ${optionIndex + 1}`}
                     </label>
                   ))}
                 </div>
@@ -179,6 +202,10 @@ export default function SurveyBuilderPage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const totalQuestions = sections.reduce((total, section) => total + section.questions.length, 0);
+  const maximumScore = sections.reduce(
+    (total, section) => total + section.questions.reduce((subtotal, question) => subtotal + questionMaximumScore(question), 0),
+    0,
+  );
 
   async function loadSurveys() {
     const data = await apiFetch<{ items: Survey[] }>("/api/admin/surveys");
@@ -210,7 +237,11 @@ export default function SurveyBuilderPage() {
           text: question.question_text,
           type: question.type,
           required: question.required,
-          options: question.options.map((option) => option.label),
+          options: question.options.map((option) => ({
+            label: option.label,
+            points: Number(option.points),
+          })),
+          scoreWeight: Number(question.score_weight ?? 1),
           scaleMin: question.scale_min ?? 1,
           scaleMax: question.scale_max ?? 5,
           minLabel: question.min_label ?? "",
@@ -278,7 +309,11 @@ export default function SurveyBuilderPage() {
         if (section.id !== sectionId) return section;
         const source = section.questions.find((question) => question.id === questionId);
         if (!source) return section;
-        const copy = { ...source, id: crypto.randomUUID(), options: [...source.options] };
+        const copy = {
+          ...source,
+          id: crypto.randomUUID(),
+          options: source.options.map((option) => ({ ...option })),
+        };
         const index = section.questions.findIndex((question) => question.id === questionId);
         const questions = [...section.questions];
         questions.splice(index + 1, 0, copy);
@@ -309,14 +344,19 @@ export default function SurveyBuilderPage() {
     );
   }
 
-  function updateOption(sectionId: string, questionId: string, optionIndex: number, value: string) {
+  function updateOption(
+    sectionId: string,
+    questionId: string,
+    optionIndex: number,
+    patch: Partial<ChoiceDraft>,
+  ) {
     setSections((current) =>
       current.map((section) => section.id !== sectionId ? section : {
         ...section,
         questions: section.questions.map((question) => {
           if (question.id !== questionId) return question;
           const options = [...question.options];
-          options[optionIndex] = value;
+          options[optionIndex] = { ...options[optionIndex], ...patch };
           return { ...question, options };
         }),
       }),
@@ -345,8 +385,12 @@ export default function SurveyBuilderPage() {
               type: question.type,
               required: question.required,
               options: ["single_choice", "multi_choice"].includes(question.type)
-                ? question.options.map((option) => option.trim())
+                ? question.options.map((option) => ({
+                    label: option.label.trim(),
+                    points: option.points,
+                  }))
                 : [],
+              score_weight: question.scoreWeight,
               scale_min: question.scaleMin,
               scale_max: question.scaleMax,
               min_label: question.minLabel,
@@ -399,7 +443,10 @@ export default function SurveyBuilderPage() {
       <section id="survey-editor" className="flex flex-wrap items-center justify-between gap-4 rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
         <div>
           <h2 className="text-lg font-semibold text-[#1F3A5F]">{editingSurveyId ? "Edit draft" : "Create a survey"}</h2>
-          <p className="mt-1 text-sm text-slate-500">{sections.length} sections · {totalQuestions} questions</p>
+          <p className="mt-1 text-sm text-slate-500">
+            {sections.length} sections · {totalQuestions} questions · {displayScore(maximumScore)} maximum points.
+            {" "}Section scores sum question scores; mean = total ÷ section count.
+          </p>
         </div>
         <div className="flex flex-wrap gap-2">
           {editingSurveyId !== null && (
@@ -465,6 +512,12 @@ export default function SurveyBuilderPage() {
                     className={fieldClassName}
                   />
                 </label>
+                <p className="mt-6 whitespace-nowrap text-xs font-medium text-slate-500">
+                  Max: {displayScore(section.questions.reduce(
+                    (total, question) => total + questionMaximumScore(question),
+                    0,
+                  ))} points
+                </p>
                 {sections.length > 1 && (
                   <button
                     type="button"
@@ -509,7 +562,9 @@ export default function SurveyBuilderPage() {
 
                   {isChoice && (
                     <fieldset className="mt-5 space-y-3">
-                      <legend className="text-sm font-medium text-slate-700">Answer choices</legend>
+                      <legend className="text-sm font-medium text-slate-700">
+                        Answer choices · selected choices contribute assigned points
+                      </legend>
                       {question.options.map((option, optionIndex) => (
                         <div key={`${question.id}-option-${optionIndex}`} className="flex items-center gap-3">
                           <span aria-hidden="true" className={`h-4 w-4 shrink-0 border border-slate-400 ${
@@ -518,11 +573,29 @@ export default function SurveyBuilderPage() {
                           <input
                             required
                             maxLength={200}
-                            value={option}
-                            onChange={(event) => updateOption(section.id, question.id, optionIndex, event.target.value)}
+                            value={option.label}
+                            onChange={(event) => updateOption(section.id, question.id, optionIndex, { label: event.target.value })}
                             aria-label={`Choice ${optionIndex + 1}`}
                             className="min-w-0 flex-1 border-0 border-b border-slate-200 px-1 py-2 text-sm outline-none focus:border-teal-600"
                           />
+                          <label className="w-24 shrink-0 text-xs font-medium text-slate-600">
+                            Points
+                            <input
+                              type="number"
+                              min={0}
+                              max={10000}
+                              step={0.01}
+                              value={option.points}
+                              onChange={(event) => updateOption(
+                                section.id,
+                                question.id,
+                                optionIndex,
+                                { points: Number(event.target.value) },
+                              )}
+                              aria-label={`Points for choice ${optionIndex + 1}`}
+                              className={fieldClassName}
+                            />
+                          </label>
                           {question.options.length > 1 && (
                             <button
                               type="button"
@@ -540,7 +613,10 @@ export default function SurveyBuilderPage() {
                       <button
                         type="button"
                         onClick={() => updateQuestion(section.id, question.id, {
-                          options: [...question.options, `Option ${question.options.length + 1}`],
+                          options: [
+                            ...question.options,
+                            { label: `Option ${question.options.length + 1}`, points: 1 },
+                          ],
                         })}
                         className="ml-7 text-sm font-semibold text-teal-800 hover:underline"
                       >
@@ -594,6 +670,23 @@ export default function SurveyBuilderPage() {
                           />
                         </label>
                       </div>
+                      <label className="block max-w-xs text-xs font-medium text-slate-600">
+                        Score multiplier
+                        <input
+                          type="number"
+                          min={0}
+                          max={10000}
+                          step={0.01}
+                          value={question.scoreWeight}
+                          onChange={(event) => updateQuestion(
+                            section.id,
+                            question.id,
+                            { scoreWeight: Number(event.target.value) },
+                          )}
+                          className={fieldClassName}
+                        />
+                      </label>
+                      <p className="text-xs text-slate-500">Score = selected value × multiplier.</p>
                       {invalidScale && (
                         <p role="alert" className="text-sm text-red-700">The end of the scale must be greater than its start.</p>
                       )}
@@ -606,10 +699,29 @@ export default function SurveyBuilderPage() {
                     </div>
                   )}
                   {question.type === "yes_no" && (
-                    <div className="mt-5 flex gap-3">
-                      {["Yes", "No"].map((choice) => (
-                        <span key={choice} className="rounded-full border border-slate-300 px-4 py-2 text-sm text-slate-600">{choice}</span>
-                      ))}
+                    <div className="mt-5 space-y-3">
+                      <div className="flex gap-3">
+                        {["Yes", "No"].map((choice) => (
+                          <span key={choice} className="rounded-full border border-slate-300 px-4 py-2 text-sm text-slate-600">{choice}</span>
+                        ))}
+                      </div>
+                      <label className="block max-w-xs text-xs font-medium text-slate-600">
+                        Yes score multiplier
+                        <input
+                          type="number"
+                          min={0}
+                          max={10000}
+                          step={0.01}
+                          value={question.scoreWeight}
+                          onChange={(event) => updateQuestion(
+                            section.id,
+                            question.id,
+                            { scoreWeight: Number(event.target.value) },
+                          )}
+                          className={fieldClassName}
+                        />
+                      </label>
+                      <p className="text-xs text-slate-500">Yes = multiplier; No = 0.</p>
                     </div>
                   )}
 

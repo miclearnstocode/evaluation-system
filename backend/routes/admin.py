@@ -3,9 +3,21 @@ import re
 
 from flask import Blueprint
 
-from core import *
+if __package__ and "." in __package__:
+    from ..core import *
+else:
+    from core import *
 
 bp = Blueprint("admin_api", __name__)
+
+TARGET_ENTITIES = {
+    "vice_president": ("vice_presidents", "vice_president_id", False),
+    "campus_administrator": ("campus_administrators", "campus_administrator_id", True),
+    "satellite_college_director": ("satellite_college_directors", "satellite_college_director_id", True),
+    "director": ("directors", "director_id", False),
+    "rde_director": ("rde_directors", "rde_director_id", False),
+    "rde_center_director": ("rde_center_directors", "rde_center_director_id", False),
+}
 
 
 def _redact_email_addresses(text: str) -> str:
@@ -15,6 +27,106 @@ def _redact_email_addresses(text: str) -> str:
         text,
         flags=re.IGNORECASE,
     )
+
+
+def _generated_code(name: str) -> str:
+    base = re.sub(r"[^A-Z0-9]+", "_", name.upper()).strip("_")[:35] or "TARGET"
+    return f"{base}_{uuid.uuid4().hex[:8].upper()}"
+
+
+def _create_target(
+    cursor: Any,
+    target_type: str,
+    code: str,
+    name: str,
+    campus_id: int | None,
+    is_central: bool,
+) -> int:
+    entity = TARGET_ENTITIES.get(target_type)
+    if entity is None:
+        raise ApiError("Choose a valid target type.")
+    table, reference_column, requires_campus = entity
+    if requires_campus and campus_id is None:
+        raise ApiError("This target type must be assigned to a campus.")
+    if requires_campus:
+        cursor.execute(
+            f"INSERT INTO {table} (code, title, campus_id) VALUES (%s, %s, %s)",
+            (code, name, campus_id),
+        )
+    else:
+        cursor.execute(f"INSERT INTO {table} (code, title) VALUES (%s, %s)", (code, name))
+    entity_id = cursor.lastrowid
+    cursor.execute(
+        f"INSERT INTO targets (target_type, {reference_column}, campus_id, is_central) "
+        "VALUES (%s, %s, %s, %s)",
+        (target_type, entity_id, campus_id, is_central),
+    )
+    return cursor.lastrowid
+
+
+def _update_target(cursor: Any, target_id: int, name: str | None = None, active: bool | None = None) -> None:
+    target = fetch_one(
+        cursor,
+        "SELECT id, target_type, target_ref_id FROM target_catalog WHERE id = %s",
+        (target_id,),
+    )
+    if not target:
+        raise ApiError("Target not found.", 404)
+    table = TARGET_ENTITIES[target["target_type"]][0]
+    if name is not None:
+        cursor.execute(f"UPDATE {table} SET title = %s WHERE id = %s", (name, target["target_ref_id"]))
+    if active is not None:
+        cursor.execute("UPDATE targets SET active = %s WHERE id = %s", (active, target_id))
+
+
+def _retract_submission(cursor: Any, submission_token: str) -> None:
+    participation = fetch_one(
+        cursor,
+        "SELECT cycle_id, target_id FROM participation WHERE submission_token = %s",
+        (submission_token,),
+    )
+    if not participation:
+        return
+    answers = fetch_all(
+        cursor,
+        "SELECT ea.question_id, ea.answer_value, q.question_type "
+        "FROM evaluator_answers ea JOIN questions q ON q.id = ea.question_id "
+        "WHERE ea.submission_token = %s",
+        (submission_token,),
+    )
+    for answer in answers:
+        value = answer["answer_value"]
+        if isinstance(value, str):
+            value = json.loads(value)
+        if answer["question_type"] == "text":
+            continue
+        option_keys = value if answer["question_type"] == "multi_choice" else [value]
+        for option_key in option_keys:
+            cursor.execute(
+                "UPDATE answer_tallies SET cnt = cnt - 1 "
+                "WHERE cycle_id = %s AND target_id = %s AND question_id = %s "
+                "AND option_key = %s AND cnt > 0",
+                (
+                    participation["cycle_id"],
+                    participation["target_id"],
+                    answer["question_id"],
+                    str(int(option_key)),
+                ),
+            )
+    cursor.execute(
+        "DELETE FROM answer_tallies WHERE cycle_id = %s AND target_id = %s AND cnt = 0",
+        (participation["cycle_id"], participation["target_id"]),
+    )
+    cursor.execute(
+        "UPDATE response_counts SET total_submissions = total_submissions - 1 "
+        "WHERE cycle_id = %s AND target_id = %s AND total_submissions > 0",
+        (participation["cycle_id"], participation["target_id"]),
+    )
+    cursor.execute(
+        "DELETE FROM response_counts WHERE cycle_id = %s AND target_id = %s AND total_submissions = 0",
+        (participation["cycle_id"], participation["target_id"]),
+    )
+    cursor.execute("DELETE FROM participation WHERE submission_token = %s", (submission_token,))
 
 
 @bp.get("/api/admin/campuses")
@@ -39,8 +151,8 @@ def create_campus():
     with connection() as conn:
         cursor = conn.cursor()
         cursor.execute(
-            "INSERT INTO campuses (code, name, is_central) VALUES (%s, %s, %s)",
-            (code, name, is_central),
+            "INSERT INTO campuses (code, name, location_code, is_central) VALUES (%s, %s, %s, %s)",
+            (code, name, code, is_central),
         )
         campus_id = cursor.lastrowid
         conn.commit()
@@ -64,6 +176,9 @@ def update_campus(campus_id: int):
     for key in ("is_central", "active"):
         if key in updates:
             updates[key] = _bool_value(updates[key], key)
+    if "code" in updates:
+        updates["location_code"] = updates["code"].upper()
+        updates["code"] = updates["code"].upper()
     query = ", ".join(f"{key} = %s" for key in updates)
     with connection() as conn:
         cursor = conn.cursor()
@@ -82,8 +197,10 @@ def list_offices():
         cursor = conn.cursor(dictionary=True)
         rows = fetch_all(
             cursor,
-            "SELECT o.id, o.campus_id, o.name, o.office_type, o.active, c.name AS campus_name "
-            "FROM offices o JOIN campuses c ON c.id = o.campus_id ORDER BY c.name, o.name",
+            "SELECT tc.id, tc.campus_id, tc.name, tc.target_type AS office_type, tc.active, "
+            "c.name AS campus_name FROM target_catalog tc "
+            "LEFT JOIN campuses c ON c.id = tc.campus_id "
+            "ORDER BY c.name, tc.name",
         )
         cursor.close()
     return jsonify(items=rows)
@@ -93,28 +210,33 @@ def list_offices():
 @require_role("super_admin")
 def create_office():
     payload = _json_body()
-    campus_id = _positive_id(payload.get("campus_id"), "campus_id")
+    campus_id = _positive_id(payload.get("campus_id"), "campus_id") if payload.get("campus_id") else None
     name = str(payload.get("name", "")).strip()
-    office_type = payload.get("office_type")
-    if not name or len(name) > 150 or office_type not in {"central_admin", "campus_office"}:
-        raise ApiError("A valid office name and type are required.")
+    target_type = payload.get("target_type")
+    if target_type is None:
+        target_type = "director" if payload.get("office_type") == "central_admin" else "satellite_college_director"
+    if not name or len(name) > 255 or target_type not in TARGET_ENTITIES:
+        raise ApiError("A valid target name and type are required.")
+    is_central = (
+        _bool_value(payload["is_central"], "is_central")
+        if "is_central" in payload
+        else target_type in {"vice_president", "director"}
+    )
     with connection() as conn:
         cursor = conn.cursor(dictionary=True)
-        campus = fetch_one(cursor, "SELECT id, active FROM campuses WHERE id = %s", (campus_id,))
-        if not campus or not campus["active"]:
-            raise ApiError("Campus not found or inactive.", 404)
-        cursor.execute(
-            "INSERT INTO offices (campus_id, name, office_type) VALUES (%s, %s, %s)",
-            (campus_id, name, office_type),
-        )
-        office_id = cursor.lastrowid
-        cursor.execute(
-            "INSERT INTO targets (target_type, office_id, campus_id, is_central) VALUES ('office', %s, %s, %s)",
-            (office_id, campus_id, office_type == "central_admin"),
-        )
+        if campus_id is not None:
+            campus = fetch_one(cursor, "SELECT id, active, is_central FROM campuses WHERE id = %s", (campus_id,))
+            if not campus or not campus["active"]:
+                raise ApiError("Campus not found or inactive.", 404)
+            if "is_central" not in payload:
+                is_central = bool(campus["is_central"])
+        code = str(payload.get("code") or _generated_code(name)).strip().upper()
+        if not code or len(code) > 50:
+            raise ApiError("A valid target code is required.")
+        target_id = _create_target(cursor, target_type, code, name, campus_id, is_central)
         conn.commit()
         cursor.close()
-    return jsonify(id=office_id), 201
+    return jsonify(id=target_id), 201
 
 
 @bp.patch("/api/admin/offices/<int:office_id>")
@@ -127,12 +249,13 @@ def update_office(office_id: int):
         raise ApiError("Provide a name or active status.")
     if "active" in updates:
         updates["active"] = _bool_value(updates["active"], "active")
-    query = ", ".join(f"{key} = %s" for key in updates)
+    if "name" in updates:
+        updates["name"] = str(updates["name"]).strip()
+        if not updates["name"] or len(updates["name"]) > 255:
+            raise ApiError("Target name must contain 1 to 255 characters.")
     with connection() as conn:
-        cursor = conn.cursor()
-        cursor.execute(f"UPDATE offices SET {query} WHERE id = %s", (*updates.values(), office_id))
-        if cursor.rowcount == 0:
-            raise ApiError("Office not found.", 404)
+        cursor = conn.cursor(dictionary=True)
+        _update_target(cursor, office_id, updates.get("name"), updates.get("active"))
         conn.commit()
         cursor.close()
     return jsonify(status="ok")
@@ -145,10 +268,12 @@ def list_administrators():
         cursor = conn.cursor(dictionary=True)
         rows = fetch_all(
             cursor,
-            "SELECT a.id, a.office_id, a.name, a.position, a.active, o.name AS office_name, "
-            "o.campus_id, c.name AS campus_name FROM administrators a "
-            "JOIN offices o ON o.id = a.office_id JOIN campuses c ON c.id = o.campus_id "
-            "ORDER BY a.name",
+            "SELECT tc.id, tc.id AS office_id, tc.name, NULL AS position, tc.active, "
+            "tc.name AS office_name, tc.campus_id, c.name AS campus_name, "
+            "tc.target_type FROM target_catalog tc "
+            "LEFT JOIN campuses c ON c.id = tc.campus_id "
+            "WHERE tc.target_type IN ('campus_administrator', 'satellite_college_director') "
+            "ORDER BY tc.name",
         )
         cursor.close()
     return jsonify(items=rows)
@@ -161,26 +286,28 @@ def create_administrator():
     office_id = _positive_id(payload.get("office_id"), "office_id")
     name = str(payload.get("name", "")).strip()
     position = str(payload.get("position", "")).strip() or None
-    if not name or len(name) > 150:
+    if not name or len(name) > 255:
         raise ApiError("A valid administrator name is required.")
     with connection() as conn:
         cursor = conn.cursor(dictionary=True)
         office = fetch_one(
             cursor,
-            "SELECT id, campus_id, office_type FROM offices WHERE id = %s",
+            "SELECT id, campus_id, target_type, is_central FROM target_catalog WHERE id = %s",
             (office_id,),
         )
         if not office:
-            raise ApiError("Office not found.", 404)
-        cursor.execute(
-            "INSERT INTO administrators (office_id, name, position) VALUES (%s, %s, %s)",
-            (office_id, name, position),
-        )
-        administrator_id = cursor.lastrowid
-        cursor.execute(
-            "INSERT INTO targets (target_type, administrator_id, campus_id, is_central) "
-            "VALUES ('administrator', %s, %s, %s)",
-            (administrator_id, office["campus_id"], office["office_type"] == "central_admin"),
+            raise ApiError("Target not found.", 404)
+        if office["campus_id"] is None:
+            raise ApiError("Choose a campus-specific target before creating an administrator target.")
+        title = f"{name} — {position}" if position else name
+        code = _generated_code(title)
+        administrator_id = _create_target(
+            cursor,
+            "campus_administrator",
+            code,
+            title,
+            office["campus_id"],
+            bool(office["is_central"]),
         )
         conn.commit()
         cursor.close()
@@ -191,18 +318,22 @@ def create_administrator():
 @require_role("super_admin")
 def update_administrator(administrator_id: int):
     payload = _json_body()
-    allowed = {"name", "position", "active"}
+    allowed = {"name", "active"}
+    if set(payload) - allowed:
+        raise ApiError("Only administrator name and active status can be changed.")
     updates = {key: payload[key] for key in allowed if key in payload}
     if not updates:
         raise ApiError("Provide at least one administrator field to update.")
     if "active" in updates:
         updates["active"] = _bool_value(updates["active"], "active")
-    query = ", ".join(f"{key} = %s" for key in updates)
     with connection() as conn:
-        cursor = conn.cursor()
-        cursor.execute(f"UPDATE administrators SET {query} WHERE id = %s", (*updates.values(), administrator_id))
-        if cursor.rowcount == 0:
-            raise ApiError("Administrator not found.", 404)
+        cursor = conn.cursor(dictionary=True)
+        name = updates.get("name")
+        if name is not None:
+            name = str(name).strip()
+            if not name or len(name) > 255:
+                raise ApiError("Administrator name must contain 1 to 255 characters.")
+        _update_target(cursor, administrator_id, name, updates.get("active"))
         conn.commit()
         cursor.close()
     return jsonify(status="ok")
@@ -215,15 +346,11 @@ def list_targets():
         cursor = conn.cursor(dictionary=True)
         rows = fetch_all(
             cursor,
-            "SELECT t.id, t.target_type, t.campus_id, t.is_central, c.name AS campus_name, "
-            "CASE WHEN t.target_type = 'office' THEN o.name "
-            "ELSE CONCAT(c.name, ' — ', o.name, ' (', a.name, ')') END AS name "
-            "FROM targets t JOIN campuses c ON c.id = t.campus_id AND c.active = 1 "
-            "LEFT JOIN administrators a ON a.id = t.administrator_id "
-            "LEFT JOIN offices o ON o.id = COALESCE(t.office_id, a.office_id) "
-            "WHERE (t.target_type = 'office' AND o.active = 1 OR "
-            "t.target_type = 'administrator' AND a.active = 1) "
-            "ORDER BY campus_name, name",
+            "SELECT tc.id, tc.target_type, tc.campus_id, tc.is_central, "
+            "c.name AS campus_name, tc.name FROM target_catalog tc "
+            "LEFT JOIN campuses c ON c.id = tc.campus_id "
+            "WHERE tc.active = 1 AND (tc.campus_id IS NULL OR c.active = 1) "
+            "ORDER BY campus_name, tc.name",
         )
         cursor.close()
     return jsonify(items=rows)
@@ -237,15 +364,13 @@ def list_users():
         rows = fetch_all(
             cursor,
             "SELECT u.id, u.email, u.role, u.campus_id, u.evaluator_group, u.position_role, "
-            "u.office_unit_code, u.years_of_service, u.is_central_staff, "
+            "NULL AS office_unit_code, u.years_of_service, u.is_central_staff, "
             "u.active, c.name AS campus_name, "
-            "CASE u.office_unit_code WHEN 'FACULTY' THEN 'I am a Faculty' "
-            "WHEN 'STUDENT' THEN 'I am a Student' ELSE COALESCE("
-            "(SELECT GROUP_CONCAT(o.name ORDER BY o.name SEPARATOR ', ') "
-            "FROM office_memberships om JOIN offices o ON o.id = om.office_id "
-            "WHERE om.user_id = u.id), r.name) END AS office_unit_name "
+            "GROUP_CONCAT(tc.name ORDER BY tc.name SEPARATOR ', ') AS office_unit_name "
             "FROM users u LEFT JOIN campuses c ON c.id = u.campus_id "
-            "LEFT JOIN registration_units r ON r.code = u.office_unit_code ORDER BY u.email",
+            "LEFT JOIN user_office_assignments ua ON ua.user_id = u.id "
+            "LEFT JOIN target_catalog tc ON tc.id = ua.target_id "
+            "GROUP BY u.id, c.name ORDER BY u.email",
         )
         cursor.close()
     return jsonify(items=rows)
@@ -327,13 +452,18 @@ def delete_user(user_id: int):
 
         conn.start_transaction()
         try:
-            cursor.callproc("delete_evaluator_account", (user_id,))
+            tokens = fetch_all(
+                cursor,
+                "SELECT submission_token FROM participation WHERE user_id = %s",
+                (user_id,),
+            )
+            for row in tokens:
+                _retract_submission(cursor, row["submission_token"])
             _audit(cursor, actor, "delete", "user", user_id)
+            cursor.execute("DELETE FROM users WHERE id = %s", (user_id,))
             conn.commit()
-        except mysql.connector.Error as error:
+        except Exception:
             conn.rollback()
-            if error.errno == 1644:
-                raise ApiError("The evaluator account changed and could not be deleted. Refresh and try again.", 409) from None
             raise
         finally:
             cursor.close()
@@ -377,7 +507,7 @@ def create_survey():
 def get_survey(survey_id: int):
     with connection() as conn:
         cursor = conn.cursor(dictionary=True)
-        survey = _load_survey(cursor, survey_id)
+        survey = _load_survey(cursor, survey_id, include_scoring=True)
         cursor.close()
     return jsonify(survey)
 
@@ -416,7 +546,7 @@ def publish_survey(survey_id: int):
             raise ApiError("Survey not found.", 404)
         if survey["status"] != "draft":
             raise ApiError("Only draft surveys can be published.", 409)
-        question = fetch_one(cursor, "SELECT COUNT(*) AS total FROM questions WHERE survey_id = %s AND archived = 0", (survey_id,))
+        question = fetch_one(cursor, "SELECT COUNT(*) AS total FROM questions WHERE survey_id = %s AND is_archived = 0", (survey_id,))
         if question["total"] == 0:
             raise ApiError("Add at least one question before publishing.")
         cursor.execute("UPDATE surveys SET status = 'published' WHERE id = %s", (survey_id,))
@@ -444,7 +574,7 @@ def clone_survey(survey_id: int):
             (original["title"], original["description"], new_version),
         )
         new_id = cursor.lastrowid
-        content = _load_survey(cursor, survey_id)
+        content = _load_survey(cursor, survey_id, include_scoring=True)
         sections = [
             {
                 "title": section["title"],
@@ -453,7 +583,11 @@ def clone_survey(survey_id: int):
                         "text": question["question_text"],
                         "type": question["type"],
                         "required": bool(question["required"]),
-                        "options": [option["label"] for option in question["options"]],
+                        "options": [
+                            {"label": option["label"], "points": option["points"]}
+                            for option in question["options"]
+                        ],
+                        "score_weight": question["score_weight"],
                         "scale_min": question["scale_min"] or 1,
                         "scale_max": question["scale_max"] or 5,
                         "min_label": question["min_label"],
@@ -477,7 +611,7 @@ def list_cycles():
         cursor = conn.cursor(dictionary=True)
         rows = fetch_all(
             cursor,
-            "SELECT c.id, c.survey_id, c.target_type, c.name, c.opens_at, c.closes_at, c.status, "
+            "SELECT c.id, c.survey_id, c.target_type, c.title AS name, c.opens_at, c.closes_at, c.status, "
             "c.min_responses, c.allow_same_campus, s.title AS survey_title "
             "FROM eval_cycles c JOIN surveys s ON s.id = c.survey_id ORDER BY c.id DESC",
         )
@@ -507,7 +641,7 @@ def create_cycle():
             raise ApiError("Choose a published survey.", 409)
         allow_same = _bool_value(payload.get("allow_same_campus", True), "allow_same_campus")
         cursor.execute(
-            "INSERT INTO eval_cycles (survey_id, target_type, name, opens_at, closes_at, min_responses, allow_same_campus) "
+            "INSERT INTO eval_cycles (survey_id, target_type, title, opens_at, closes_at, min_responses, allow_same_campus) "
             "VALUES (%s, 'all', %s, %s, %s, %s, %s)",
             (survey_id, name, opens_at, closes_at, current_app.config["MIN_RESULT_COUNT"], allow_same),
         )
@@ -533,15 +667,21 @@ def update_cycle_rules(cycle_id: int):
         group = rule.get("evaluator_group")
         if group is not None and group not in EVALUATOR_GROUPS:
             raise ApiError("Invalid evaluator group in eligibility rule.")
-        for key in ("evaluator_is_central", "target_is_central", "same_campus"):
-            if key in rule and rule[key] is not None:
-                _bool_value(rule[key], key)
+        target_central = rule.get("require_target_central", rule.get("target_is_central"))
+        same_campus = rule.get("require_same_campus", rule.get("same_campus"))
+        for key, value in (
+            ("evaluator_is_central", rule.get("evaluator_is_central")),
+            ("require_target_central", target_central),
+            ("require_same_campus", same_campus),
+        ):
+            if value is not None:
+                _bool_value(value, key)
         clean.append(
             (
                 rule.get("evaluator_is_central"),
                 group,
-                rule.get("target_is_central"),
-                rule.get("same_campus"),
+                target_central,
+                same_campus,
                 rule["effect"],
             )
         )
@@ -555,7 +695,7 @@ def update_cycle_rules(cycle_id: int):
         cursor.execute("DELETE FROM eligibility_rules WHERE cycle_id = %s", (cycle_id,))
         cursor.executemany(
             "INSERT INTO eligibility_rules "
-            "(cycle_id, evaluator_is_central, evaluator_group, target_is_central, same_campus, effect) "
+            "(cycle_id, evaluator_is_central, evaluator_group, require_target_central, require_same_campus, action) "
             "VALUES (%s, %s, %s, %s, %s, %s)",
             [(cycle_id, *rule) for rule in clean],
         )
@@ -613,30 +753,25 @@ def participation_report():
     actor = request_user()
     with connection() as conn:
         cursor = conn.cursor(dictionary=True)
-        cycle = fetch_one(cursor, "SELECT id, name, status FROM eval_cycles WHERE id = %s", (cycle_id,))
+        cycle = fetch_one(cursor, "SELECT id, title AS name, status FROM eval_cycles WHERE id = %s", (cycle_id,))
         if not cycle:
             raise ApiError("Cycle not found.", 404)
         _audit(cursor, actor, "view", "participation", cycle_id)
         targets = fetch_all(
             cursor,
-            "SELECT t.id, t.target_type, t.campus_id, t.is_central, "
-            "COALESCE(t.office_id, a.office_id) AS target_office_id, "
-            "t.administrator_id AS target_administrator_id, o.unit_code AS office_unit_code, "
-            "CASE WHEN t.target_type = 'office' THEN o.name "
-            "ELSE CONCAT(c.name, ' — ', o.name, ' (', a.name, ')') END AS target_name, "
+            "SELECT t.id, t.target_type, tc.campus_id, t.is_central, tc.name AS target_name, "
             "COALESCE(pc.submitted, 0) AS submitted "
             "FROM cycle_targets ct JOIN targets t ON t.id = ct.target_id "
-            "LEFT JOIN administrators a ON a.id = t.administrator_id "
-            "LEFT JOIN offices o ON o.id = COALESCE(t.office_id, a.office_id) "
-            "JOIN campuses c ON c.id = t.campus_id "
+            "JOIN target_catalog tc ON tc.id = t.id "
             "LEFT JOIN participation_counts pc ON pc.cycle_id = ct.cycle_id AND pc.target_id = t.id "
+            "LEFT JOIN campuses c ON c.id = tc.campus_id "
             "WHERE ct.cycle_id = %s ORDER BY target_name",
             (cycle_id,),
         )
         rules = _load_rules(cursor, cycle_id)
         evaluators = fetch_all(
             cursor,
-            "SELECT id, campus_id, evaluator_group, office_unit_code, is_central_staff FROM users "
+            "SELECT id, campus_id, evaluator_group, is_central_staff FROM users "
             "WHERE role = 'evaluator' AND active = 1",
         )
         for target in targets:
@@ -650,6 +785,141 @@ def participation_report():
     return jsonify(cycle=cycle, items=targets)
 
 
+@bp.get("/api/admin/submissions")
+@require_role("super_admin")
+def list_submissions():
+    cycle_id = _positive_id(request.args.get("cycle_id"), "cycle_id")
+    target_id = _positive_id(request.args.get("target_id"), "target_id")
+    actor = request_user()
+    with connection() as conn:
+        cursor = conn.cursor(dictionary=True)
+        cycle = fetch_one(
+            cursor,
+            "SELECT id, status FROM eval_cycles WHERE id = %s",
+            (cycle_id,),
+        )
+        if not cycle or cycle["status"] not in {"open", "closed"}:
+            raise ApiError("Submissions are available only for open or closed cycles.", 409)
+        if not _load_cycle_target(cursor, cycle_id, target_id):
+            raise ApiError("Target not found in this cycle.", 404)
+        items = fetch_all(
+            cursor,
+            "SELECT submission_token, submitted_at FROM participation "
+            "WHERE cycle_id = %s AND target_id = %s ORDER BY submitted_at DESC",
+            (cycle_id, target_id),
+        )
+        _audit(cursor, actor, "view", "submission_list", f"{cycle_id}:{target_id}")
+        conn.commit()
+        cursor.close()
+    return jsonify(items=items)
+
+
+@bp.post("/api/admin/submissions/review")
+@require_role("super_admin")
+def review_submission():
+    payload = _json_body()
+    try:
+        submission_token = str(uuid.UUID(payload.get("submission_token", "")))
+    except (AttributeError, TypeError, ValueError):
+        raise ApiError("Submission not found.", 404) from None
+    actor = request_user()
+    with connection() as conn:
+        cursor = conn.cursor(dictionary=True)
+        submission = fetch_one(
+            cursor,
+            "SELECT cycle_id, target_id FROM participation WHERE submission_token = %s",
+            (submission_token,),
+        )
+        if not submission:
+            raise ApiError("Submission not found.", 404)
+        cycle = fetch_one(
+            cursor,
+            "SELECT status, opens_at, closes_at FROM eval_cycles WHERE id = %s",
+            (submission["cycle_id"],),
+        )
+        if not cycle or not (_cycle_is_open(cycle) or _cycle_is_closed(cycle)):
+            raise ApiError("Submissions can be reviewed only while a cycle is open or after it closes.", 409)
+        answers = fetch_all(
+            cursor,
+            "SELECT ea.question_id, ea.answer_value, ea.score, q.prompt, q.question_type "
+            "FROM evaluator_answers ea JOIN questions q ON q.id = ea.question_id "
+            "WHERE ea.submission_token = %s ORDER BY q.sort_order, q.id",
+            (submission_token,),
+        )
+        for answer in answers:
+            value = answer["answer_value"]
+            if isinstance(value, str):
+                value = json.loads(value)
+            if answer["question_type"] == "single_choice":
+                option = fetch_one(
+                    cursor,
+                    "SELECT option_text FROM question_options WHERE id = %s",
+                    (value,),
+                )
+                value = option["option_text"] if option else str(value)
+            elif answer["question_type"] == "multi_choice" and value:
+                placeholders = ", ".join(["%s"] * len(value))
+                options = fetch_all(
+                    cursor,
+                    f"SELECT id, option_text FROM question_options WHERE id IN ({placeholders})",
+                    tuple(value),
+                )
+                labels = {option["id"]: option["option_text"] for option in options}
+                value = [labels.get(option_id, str(option_id)) for option_id in value]
+            elif answer["question_type"] == "yes_no":
+                value = "Yes" if value else "No"
+            elif answer["question_type"] == "text":
+                value = _redact_email_addresses(value)
+            answer["answer"] = value
+            answer["score"] = float(answer["score"]) if answer["score"] is not None else None
+            del answer["answer_value"]
+        comments = fetch_all(
+            cursor,
+            "SELECT cm.id, cm.question_id, q.prompt AS question, cm.comment_text, cm.status "
+            "FROM comments cm JOIN questions q ON q.id = cm.question_id "
+            "WHERE cm.submission_token = %s ORDER BY q.sort_order, q.id",
+            (submission_token,),
+        )
+        for comment in comments:
+            comment["comment_text"] = _redact_email_addresses(comment["comment_text"])
+        _audit(cursor, actor, "view", "submission_review", f"{submission['cycle_id']}:{submission['target_id']}")
+        conn.commit()
+        cursor.close()
+    return jsonify(answers=answers, comments=comments)
+
+
+@bp.delete("/api/admin/submissions")
+@require_role("super_admin")
+def delete_submission():
+    payload = _json_body()
+    try:
+        submission_token = str(uuid.UUID(payload.get("submission_token", "")))
+    except (AttributeError, TypeError, ValueError):
+        raise ApiError("Submission not found.", 404) from None
+    actor = request_user()
+    with connection() as conn:
+        cursor = conn.cursor(dictionary=True)
+        conn.start_transaction()
+        try:
+            submission = fetch_one(
+                cursor,
+                "SELECT cycle_id, target_id FROM participation "
+                "WHERE submission_token = %s FOR UPDATE",
+                (submission_token,),
+            )
+            if not submission:
+                raise ApiError("Submission not found.", 404)
+            _retract_submission(cursor, submission_token)
+            _audit(cursor, actor, "delete", "submission", f"{submission['cycle_id']}:{submission['target_id']}")
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            cursor.close()
+    return jsonify(status="deleted")
+
+
 @bp.get("/api/admin/results")
 @require_role("super_admin")
 def results():
@@ -660,7 +930,7 @@ def results():
         cursor = conn.cursor(dictionary=True)
         cycle = fetch_one(
             cursor,
-            "SELECT id, survey_id, name, status, closes_at, min_responses "
+            "SELECT id, survey_id, title AS name, status, closes_at, min_responses "
             "FROM eval_cycles WHERE id = %s",
             (cycle_id,),
         )
@@ -673,7 +943,7 @@ def results():
             raise ApiError("Target not found in this cycle.", 404)
         counts = fetch_all(
             cursor,
-            "SELECT total FROM response_counts WHERE cycle_id = %s AND target_id = %s",
+            "SELECT total_submissions AS total FROM response_counts WHERE cycle_id = %s AND target_id = %s",
             (cycle_id, target_id),
         )
         total = sum(row["total"] for row in counts)
@@ -686,8 +956,14 @@ def results():
         survey = _load_survey(cursor, cycle["survey_id"])
         answer_rows = fetch_all(
             cursor,
-            "SELECT response_id, question_id, answer_value "
+            "SELECT response_id, question_id, answer_value, score AS question_score "
             "FROM evaluator_answers WHERE cycle_id = %s AND target_id = %s ORDER BY RAND()",
+            (cycle_id, target_id),
+        )
+        score_rows = fetch_all(
+            cursor,
+            "SELECT response_id, total_score, mean_score, section_scores "
+            "FROM evaluator_response_scores WHERE cycle_id = %s AND target_id = %s ORDER BY RAND()",
             (cycle_id, target_id),
         )
         questions_by_id = {
@@ -695,7 +971,20 @@ def results():
             for section in survey["sections"]
             for question in section["questions"]
         }
-        response_answers: dict[str, dict[int, dict[str, Any]]] = {}
+        response_answers: dict[str, dict[str, Any]] = {}
+        for row in score_rows:
+            section_scores = row["section_scores"]
+            if isinstance(section_scores, str):
+                section_scores = json.loads(section_scores)
+            response_answers[row["response_id"]] = {
+                "answers": {},
+                "total_score": float(row["total_score"]),
+                "mean_score": float(row["mean_score"]),
+                "section_scores": [
+                    {**section, "score": float(section["score"])}
+                    for section in section_scores
+                ],
+            }
         for row in answer_rows:
             question = questions_by_id.get(row["question_id"])
             if not question:
@@ -715,20 +1004,25 @@ def results():
                 answer_value = "Yes" if answer_value else "No"
             elif question["type"] == "text":
                 answer_value = _redact_email_addresses(answer_value)
-            response_answers.setdefault(row["response_id"], {})[row["question_id"]] = {
+            response = response_answers.setdefault(row["response_id"], {"answers": {}})
+            response["answers"][row["question_id"]] = {
                 "question": question["question_text"],
                 "answer": answer_value,
+                "score": float(row["question_score"]) if row["question_score"] is not None else None,
             }
-        individual_responses = [
-            {
-                "answers": [
-                    response[question["id"]]
-                    for question in questions_by_id.values()
-                    if question["id"] in response
-                ]
-            }
-            for response in response_answers.values()
-        ]
+        individual_responses = []
+        for response in response_answers.values():
+            answers = response.pop("answers")
+            individual_responses.append(
+                {
+                    **response,
+                    "answers": [
+                        answers[question["id"]]
+                        for question in questions_by_id.values()
+                        if question["id"] in answers
+                    ],
+                }
+            )
         question_results = []
         for section in survey["sections"]:
             for question in section["questions"]:
@@ -740,8 +1034,16 @@ def results():
                     (cycle_id, target_id, question["id"]),
                 )
                 value_count = sum(row["count"] for row in distributions)
+                normalized_distributions = []
+                for row in distributions:
+                    value = row["option_key"]
+                    if question["type"] in {"scale", "rating", "yes_no"}:
+                        value = int(value)
+                    elif value.isdigit():
+                        value = int(value)
+                    normalized_distributions.append({**row, "value": value})
                 mean = (
-                    round(sum(row["option_key"] * row["count"] for row in distributions) / value_count, 2)
+                    round(sum(row["value"] * row["count"] for row in normalized_distributions) / value_count, 2)
                     if question["type"] in {"scale", "rating", "yes_no"} and value_count
                     else None
                 )
@@ -759,11 +1061,11 @@ def results():
                         "mean": mean,
                         "distribution": [
                             {
-                                "value": row["option_key"],
-                                "label": labels.get(row["option_key"], str(row["option_key"])),
+                                "value": row["value"],
+                                "label": labels.get(row["value"], str(row["value"])),
                                 "count": row["count"],
                             }
-                            for row in distributions
+                            for row in normalized_distributions
                         ],
                     }
                 )
@@ -799,7 +1101,7 @@ def list_comments():
             raise ApiError("Target not found in this cycle.", 404)
         rows = fetch_all(
             cursor,
-            "SELECT cm.id, cm.question_id, cm.body, cm.status, q.question_text "
+            "SELECT cm.id, cm.question_id, cm.comment_text AS body, cm.status, q.prompt AS question_text "
             "FROM comments cm JOIN questions q ON q.id = cm.question_id "
             "WHERE cm.cycle_id = %s AND cm.target_id = %s AND cm.status = %s "
             "ORDER BY RAND()",
@@ -821,13 +1123,9 @@ def list_comments():
     return jsonify(items=visible)
 
 
-@bp.post("/api/admin/comments/<comment_id>/moderate")
+@bp.post("/api/admin/comments/<int:comment_id>/moderate")
 @require_role("super_admin")
-def moderate_comment(comment_id: str):
-    try:
-        normalized_id = str(uuid.UUID(comment_id))
-    except ValueError:
-        raise ApiError("Comment not found.", 404) from None
+def moderate_comment(comment_id: int):
     payload = _json_body()
     status = payload.get("status")
     if status not in {"approved", "hidden"}:
@@ -840,7 +1138,7 @@ def moderate_comment(comment_id: str):
             "SELECT cm.id, cm.cycle_id, cm.target_id, cm.question_id, c.status AS cycle_status, "
             "c.opens_at, c.closes_at "
             "FROM comments cm JOIN eval_cycles c ON c.id = cm.cycle_id WHERE cm.id = %s",
-            (normalized_id,),
+            (comment_id,),
         )
         if not comment:
             raise ApiError("Comment not found.", 404)
@@ -851,8 +1149,8 @@ def moderate_comment(comment_id: str):
         }
         if not (_cycle_is_open(cycle) or _cycle_is_closed(cycle)):
             raise ApiError("Comments can be moderated only while a cycle is open or after it closes.", 409)
-        cursor.execute("UPDATE comments SET status = %s WHERE id = %s", (status, normalized_id))
-        _audit(cursor, actor, status, "comment", normalized_id)
+        cursor.execute("UPDATE comments SET status = %s WHERE id = %s", (status, comment_id))
+        _audit(cursor, actor, status, "comment", comment_id)
         conn.commit()
         cursor.close()
     return jsonify(status=status)

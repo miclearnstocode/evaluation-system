@@ -8,10 +8,16 @@ from pathlib import Path
 if __package__ in (None, ""):
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from core import *
-from routes.admin import bp as admin_bp
-from routes.auth import bp as auth_bp
-from routes.evaluator import bp as evaluator_bp
+if __package__:
+    from .core import *
+    from .routes.admin import bp as admin_bp
+    from .routes.auth import bp as auth_bp
+    from .routes.evaluator import bp as evaluator_bp
+else:
+    from core import *
+    from routes.admin import bp as admin_bp
+    from routes.auth import bp as auth_bp
+    from routes.evaluator import bp as evaluator_bp
 
 
 def create_app(test_config: dict[str, Any] | None = None) -> Flask:

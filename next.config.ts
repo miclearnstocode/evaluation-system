@@ -1,16 +1,17 @@
 import type { NextConfig } from "next";
 
-const nextConfig: NextConfig = {
-  output: "export",
+const isExport = process.env.NEXT_EXPORT === "1";
+
+const baseConfig: NextConfig = {
   trailingSlash: true,
   images: {
     unoptimized: true,
     remotePatterns: [
       {
-        protocol: 'https',
-        hostname: 'res.cloudinary.com',
-        port: '',
-        pathname: '/**',
+        protocol: "https",
+        hostname: "res.cloudinary.com",
+        port: "",
+        pathname: "/**",
       },
     ],
   },
@@ -23,5 +24,23 @@ const nextConfig: NextConfig = {
     },
   },
 };
+
+const nextConfig: NextConfig = isExport
+  ? {
+      ...baseConfig,
+      output: "export",
+    }
+  : {
+      ...baseConfig,
+
+      async rewrites() {
+        return [
+          {
+            source: "/api/:path*",
+            destination: `${process.env.BACKEND_API_URL ?? "http://127.0.0.1:5200"}/api/:path*`,
+          },
+        ];
+      },
+    };
 
 export default nextConfig;

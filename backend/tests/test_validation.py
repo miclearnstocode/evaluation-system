@@ -56,9 +56,46 @@ class SubmissionValidationTests(unittest.TestCase):
             ]
         )
         self.assertEqual(len(sections[0]["questions"]), 2)
+        self.assertEqual(sections[0]["questions"][0]["score_weight"], 1)
+        self.assertEqual(sections[0]["questions"][1]["options"][0]["points"], 1)
+        weighted = validate_survey_payload(
+            [
+                {
+                    "title": "Weighted",
+                    "questions": [
+                        {
+                            "type": "multi_choice",
+                            "text": "Which services did you use?",
+                            "score_weight": 2.5,
+                            "options": [
+                                {"label": "Library", "points": 1.25},
+                                {"label": "Registrar", "points": 3},
+                            ],
+                        }
+                    ],
+                }
+            ]
+        )
+        self.assertEqual(weighted[0]["questions"][0]["score_weight"], 2.5)
+        self.assertEqual(weighted[0]["questions"][0]["options"][0]["points"], 1.25)
         with self.assertRaises(ApiError):
             validate_survey_payload(
                 [{"title": "Service", "questions": [{"type": "single_choice", "text": "Choose one", "options": ["Same", "Same"]}]}]
+            )
+        with self.assertRaises(ApiError):
+            validate_survey_payload(
+                [
+                    {
+                        "title": "Weighted",
+                        "questions": [
+                            {
+                                "type": "single_choice",
+                                "text": "Choose one",
+                                "options": [{"label": "Option", "points": -1}],
+                            }
+                        ],
+                    }
+                ]
             )
 
 

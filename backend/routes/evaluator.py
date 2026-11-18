@@ -2,7 +2,12 @@ import json
 
 from flask import Blueprint
 
-from core import *
+if __package__ and "." in __package__:
+    from ..core import *
+    from ..scoring import calculate_response_scores
+else:
+    from core import *
+    from scoring import calculate_response_scores
 
 bp = Blueprint("evaluator_api", __name__)
 
@@ -14,7 +19,7 @@ def evaluator_targets():
         cursor = conn.cursor(dictionary=True)
         cycles = fetch_all(
             cursor,
-            "SELECT c.id AS cycle_id, c.name AS cycle_name, c.opens_at, c.closes_at, c.survey_id "
+            "SELECT c.id AS cycle_id, c.title AS cycle_name, c.opens_at, c.closes_at, c.survey_id "
             "FROM eval_cycles c WHERE c.status = 'open' ORDER BY c.closes_at",
         )
         items = []
@@ -24,18 +29,13 @@ def evaluator_targets():
             rules = _load_rules(cursor, cycle["cycle_id"])
             targets = fetch_all(
                 cursor,
-                "SELECT t.id AS target_id, t.target_type, t.campus_id, t.is_central, "
-                "COALESCE(t.office_id, a.office_id) AS target_office_id, "
-                "t.administrator_id AS target_administrator_id, o.unit_code AS office_unit_code, "
-                "CASE WHEN t.target_type = 'office' THEN o.name "
-                "ELSE CONCAT(c.name, ' — ', o.name, ' (', a.name, ')') END AS target_name, "
-                "c.name AS campus_name "
+                "SELECT t.id AS target_id, t.target_type, tc.campus_id, t.is_central, "
+                "tc.name AS target_name, c.name AS campus_name "
                 "FROM cycle_targets ct JOIN targets t ON t.id = ct.target_id "
-                "JOIN campuses c ON c.id = t.campus_id AND c.active = 1 "
-                "LEFT JOIN administrators a ON a.id = t.administrator_id "
-                "LEFT JOIN offices o ON o.id = COALESCE(t.office_id, a.office_id) "
-                "WHERE ct.cycle_id = %s AND (t.target_type = 'office' AND o.active = 1 OR "
-                "t.target_type = 'administrator' AND a.active = 1)",
+                "JOIN target_catalog tc ON tc.id = t.id "
+                "LEFT JOIN campuses c ON c.id = tc.campus_id "
+                "WHERE ct.cycle_id = %s AND t.active = 1 "
+                "AND (tc.campus_id IS NULL OR c.active = 1)",
                 (cycle["cycle_id"],),
             )
             for target in targets:
@@ -70,7 +70,7 @@ def evaluator_form(target_id: int):
         cursor = conn.cursor(dictionary=True)
         cycle = fetch_one(
             cursor,
-            "SELECT c.id, c.survey_id, c.name, c.opens_at, c.closes_at, c.status "
+            "SELECT c.id, c.survey_id, c.title AS name, c.opens_at, c.closes_at, c.status "
             "FROM eval_cycles c WHERE c.id = %s",
             (cycle_id,),
         )
@@ -131,7 +131,7 @@ def submit_evaluation():
             )
             if existing:
                 raise ApiError("You have already submitted this evaluation.", 409)
-            survey = _load_survey(cursor, cycle["survey_id"])
+            survey = _load_survey(cursor, cycle["survey_id"], include_scoring=True)
             if survey["status"] != "published":
                 raise ApiError("This survey is not available.", 409)
             questions = [
@@ -139,48 +139,72 @@ def submit_evaluation():
                 for section in survey["sections"]
                 for question in section["questions"]
             ]
+            questions_by_id = {question["id"]: question for question in questions}
             tallies, comments, individual_answers = validate_questions(questions, payload.get("answers"))
+            score_data = calculate_response_scores(survey["sections"], individual_answers)
             submission_token = str(uuid.uuid4())
             stage = "participation"
             cursor.execute(
                 "INSERT INTO participation "
-                "(submission_token, user_id, cycle_id, target_id, submitted_on) "
-                "VALUES (%s, %s, %s, %s, %s)",
-                (submission_token, user["id"], cycle_id, target_id, _utcnow_naive().date()),
+                "(submission_token, user_id, cycle_id, target_id) "
+                "VALUES (%s, %s, %s, %s)",
+                (submission_token, user["id"], cycle_id, target_id),
+            )
+            response_id = str(uuid.uuid4())
+            cursor.execute(
+                "INSERT INTO evaluator_response_scores "
+                "(response_id, score_link_token, cycle_id, target_id, total_score, mean_score, "
+                "section_count, section_scores) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)",
+                (
+                    response_id,
+                    submission_token,
+                    cycle_id,
+                    target_id,
+                    score_data["total_score"],
+                    score_data["mean_score"],
+                    score_data["section_count"],
+                    json.dumps(
+                        [
+                            {
+                                "section_id": section["section_id"],
+                                "title": section["title"],
+                                "score": float(section["score"]),
+                            }
+                            for section in score_data["section_scores"]
+                        ],
+                        ensure_ascii=False,
+                    ),
+                ),
             )
             stage = "answers"
             if individual_answers:
-                response_id = str(uuid.uuid4())
                 answer_contributions = [
                     (
-                        str(uuid.uuid4()),
                         question_id,
                         answer_value,
+                        score_data["question_scores"].get(question_id),
                     )
                     for question_id, answer_value in individual_answers
                 ]
                 cursor.executemany(
                     "INSERT INTO evaluator_answers "
-                    "(answer_id, response_id, cycle_id, target_id, question_id, answer_value) "
-                    "VALUES (%s, %s, %s, %s, %s, %s)",
+                    "(submission_token, response_id, cycle_id, target_id, question_id, "
+                    "selected_option_id, answer_value, score) "
+                    "VALUES (%s, %s, %s, %s, %s, %s, %s, %s)",
                     [
                         (
-                            answer_id,
+                            submission_token,
                             response_id,
                             cycle_id,
                             target_id,
                             question_id,
+                            answer_value
+                            if questions_by_id[question_id]["type"] == "single_choice"
+                            else None,
                             json.dumps(answer_value, ensure_ascii=False),
+                            question_score,
                         )
-                        for answer_id, question_id, answer_value in answer_contributions
-                    ],
-                )
-                cursor.executemany(
-                    "INSERT INTO submission_contributions "
-                    "(submission_token, question_id, answer_id) VALUES (%s, %s, %s)",
-                    [
-                        (submission_token, question_id, answer_id)
-                        for answer_id, question_id, _ in answer_contributions
+                        for question_id, answer_value, question_score in answer_contributions
                     ],
                 )
             for question_id, option_key in tallies:
@@ -189,29 +213,19 @@ def submit_evaluation():
                     "(cycle_id, target_id, question_id, option_key, cnt) "
                     "VALUES (%s, %s, %s, %s, 1) "
                     "ON DUPLICATE KEY UPDATE cnt = cnt + 1",
-                    (cycle_id, target_id, question_id, option_key),
-                )
-                cursor.execute(
-                    "INSERT INTO submission_contributions "
-                    "(submission_token, question_id, option_key) VALUES (%s, %s, %s)",
-                    (submission_token, question_id, option_key),
+                    (cycle_id, target_id, question_id, str(option_key)),
                 )
             cursor.execute(
-                "INSERT INTO response_counts (cycle_id, target_id, total) "
-                "VALUES (%s, %s, 1) ON DUPLICATE KEY UPDATE total = total + 1",
+                "INSERT INTO response_counts (cycle_id, target_id, total_submissions) "
+                "VALUES (%s, %s, 1) ON DUPLICATE KEY UPDATE total_submissions = total_submissions + 1",
                 (cycle_id, target_id),
             )
             for question_id, body in comments:
-                comment_id = str(uuid.uuid4())
                 cursor.execute(
-                    "INSERT INTO comments (id, cycle_id, target_id, question_id, body) "
+                    "INSERT INTO comments "
+                    "(submission_token, cycle_id, target_id, question_id, comment_text) "
                     "VALUES (%s, %s, %s, %s, %s)",
-                    (comment_id, cycle_id, target_id, question_id, body),
-                )
-                cursor.execute(
-                    "INSERT INTO submission_contributions "
-                    "(submission_token, question_id, comment_id) VALUES (%s, %s, %s)",
-                    (submission_token, question_id, comment_id),
+                    (submission_token, cycle_id, target_id, question_id, body),
                 )
             conn.commit()
         except mysql.connector.IntegrityError as error:

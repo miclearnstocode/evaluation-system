@@ -2,140 +2,55 @@ import unittest
 from unittest.mock import patch
 
 from backend.eligibility import _registration_policy_allows
-from backend.registration import derive_evaluator_group, unit_category
+from backend.registration import derive_evaluator_group
 
 
 class RegistrationProfileTests(unittest.TestCase):
-    def test_role_and_database_categories_determine_evaluator_group(self):
+    def test_role_and_target_types_determine_evaluator_group(self):
         self.assertEqual(derive_evaluator_group("teaching_faculty", []), "faculty")
         self.assertEqual(derive_evaluator_group("student_leader", []), "student_leader")
         self.assertEqual(
-            derive_evaluator_group("non_teaching_staff", ["campus_head"]),
+            derive_evaluator_group("non_teaching_staff", ["campus_administrator"]),
             "campus_staff",
         )
-        self.assertEqual(derive_evaluator_group("non_teaching_staff", ["vp"]), "office_staff")
         self.assertEqual(
-            derive_evaluator_group("non_teaching_staff", ["campus_head", "vp"]),
+            derive_evaluator_group(
+                "non_teaching_staff",
+                ["campus_administrator", "satellite_college_director"],
+            ),
+            "campus_staff",
+        )
+        self.assertEqual(derive_evaluator_group("non_teaching_staff", ["director"]), "office_staff")
+        self.assertEqual(
+            derive_evaluator_group("non_teaching_staff", ["campus_administrator", "director"]),
             "office_staff",
         )
 
-    def test_non_teaching_role_requires_a_database_membership_category(self):
+    def test_non_teaching_role_requires_an_assignment(self):
         with self.assertRaises(ValueError):
             derive_evaluator_group("non_teaching_staff", [])
         with self.assertRaises(ValueError):
             derive_evaluator_group("other_role", ["director"])
 
-    def test_unit_category_is_loaded_from_database(self):
+    def test_evaluator_cannot_evaluate_a_target_they_are_assigned_to(self):
+        user = {"id": 8}
+        target = {"id": 14}
         with patch(
-            "backend.registration.fetch_one",
-            return_value={"category": "director"},
+            "backend.eligibility.fetch_one",
+            return_value={"id": 5},
         ) as fetch:
-            self.assertEqual(unit_category(None, "BAC"), "director")
-
-        self.assertIn("FROM registration_units", fetch.call_args.args[1])
-        self.assertEqual(fetch.call_args.args[2], ("BAC",))
-        with self.assertRaises(ValueError):
-            derive_evaluator_group("unknown_role", [])
-
-    def test_office_staff_cannot_evaluate_an_unassigned_vp_target(self):
-        user = {"id": 8, "campus_id": 1, "evaluator_group": "office_staff", "office_unit_code": "BAC"}
-        target = {
-            "target_type": "administrator",
-            "target_office_id": 21,
-            "target_administrator_id": 90,
-            "office_unit_code": "VP_ACADEMIC",
-            "campus_id": 1,
-        }
-        with patch(
-            "backend.eligibility.fetch_one",
-            side_effect=[None, None, None],
-        ), patch("registration.fetch_one", return_value={"category": "vp"}), patch(
-            "backend.eligibility.fetch_all", return_value=[]
-        ):
             self.assertFalse(_registration_policy_allows(None, user, target))
+        self.assertIn("user_office_assignments", fetch.call_args.args[1])
+        self.assertEqual(fetch.call_args.args[2], (8, 14))
 
-    def test_office_staff_cannot_evaluate_unassigned_base_office(self):
-        user = {"id": 8, "campus_id": 1, "evaluator_group": "office_staff", "office_unit_code": "BAC"}
-        target = {
-            "target_type": "office",
-            "target_office_id": 5,
-            "target_administrator_id": None,
-            "office_unit_code": "BAC",
-            "campus_id": 1,
-        }
-        with patch("backend.eligibility.fetch_one", side_effect=[{"id": 5, "unit_code": "BAC"}, None]), patch(
-            "backend.eligibility.fetch_all", return_value=[]
-        ), patch("registration.fetch_one", return_value=None):
-            self.assertFalse(_registration_policy_allows(None, user, target))
+    def test_evaluator_can_evaluate_unassigned_target(self):
+        with patch("backend.eligibility.fetch_one", return_value=None):
+            self.assertTrue(_registration_policy_allows(None, {"id": 8}, {"id": 14}))
 
-    def test_membership_based_staff_can_evaluate_a_selected_office(self):
-        user = {"id": 8, "campus_id": 1, "evaluator_group": "office_staff", "office_unit_code": None}
-        target = {
-            "target_type": "office",
-            "target_office_id": 5,
-            "target_administrator_id": None,
-            "office_unit_code": "BAC",
-            "campus_id": 2,
-        }
-        with patch("backend.eligibility.fetch_one", side_effect=[None, None]), patch(
-            "backend.eligibility.fetch_all",
-            return_value=[{"office_id": 5, "unit_code": "BAC"}],
-        ) as membership_query:
-            self.assertTrue(_registration_policy_allows(None, user, target))
-        query = membership_query.call_args.args[1]
-        self.assertIn("JOIN offices o ON o.id = om.office_id", query)
-        self.assertIn("WHERE om.user_id = %s", query)
-        self.assertEqual(membership_query.call_args.args[2], (user["id"],))
-
-    def test_membership_requires_matching_office_id_and_unit_code(self):
-        user = {"id": 8, "evaluator_group": "office_staff", "office_unit_code": None}
-        target = {
-            "target_type": "office",
-            "target_office_id": 5,
-            "target_administrator_id": None,
-            "office_unit_code": "RESEARCH_OFFICE",
-            "campus_id": 1,
-        }
-        with patch("backend.eligibility.fetch_one", side_effect=[None, None]), patch(
-            "backend.eligibility.fetch_all",
-            return_value=[{"office_id": 5, "unit_code": "BAC"}],
-        ), patch("registration.fetch_one", return_value=None):
-            self.assertFalse(_registration_policy_allows(None, user, target))
-
-    def test_membership_allows_administrator_target_for_selected_office(self):
-        user = {"id": 8, "evaluator_group": "office_staff", "office_unit_code": None}
-        target = {
-            "target_type": "administrator",
-            "target_office_id": 5,
-            "target_administrator_id": 90,
-            "office_unit_code": "BAC",
-            "campus_id": 2,
-        }
-        with patch("backend.eligibility.fetch_one", side_effect=[None, None]), patch(
-            "backend.eligibility.fetch_all",
-            return_value=[{"office_id": 5, "unit_code": "BAC"}],
-        ):
-            self.assertTrue(_registration_policy_allows(None, user, target))
-
-    def test_office_head_cannot_evaluate_the_office_they_manage(self):
-        user = {"id": 8, "campus_id": 1, "evaluator_group": "office_staff", "office_unit_code": None}
-        target = {
-            "target_type": "office",
-            "target_office_id": 5,
-            "target_administrator_id": None,
-            "office_unit_code": "BAC",
-            "campus_id": 1,
-        }
-        with patch(
-            "backend.eligibility.fetch_one",
-            return_value={
-                "office_id": 5,
-                "administrator_id": 90,
-                "reports_to_vp_office_id": None,
-                "unit_code": "BAC",
-            },
-        ), patch("backend.eligibility.fetch_all", return_value=[]):
-            self.assertFalse(_registration_policy_allows(None, user, target))
+    def test_missing_user_or_target_id_does_not_query_assignment_table(self):
+        with patch("backend.eligibility.fetch_one") as fetch:
+            self.assertTrue(_registration_policy_allows(None, {}, {"id": 14}))
+            fetch.assert_not_called()
 
 
 if __name__ == "__main__":

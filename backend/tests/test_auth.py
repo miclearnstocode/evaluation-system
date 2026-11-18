@@ -20,19 +20,13 @@ class RegistrationCursor:
     def fetchone(self):
         if "FROM campuses" in self.query:
             return {"id": 1, "location_code": "MAIN", "is_central": 0, "active": 1}
-        if "FROM registration_roles" in self.query:
-            return {"code": "non_teaching_staff"}
-        if "FROM registration_service_years" in self.query:
-            return {"code": "1_5"}
-        if "FROM offices" in self.query:
-            return {"id": self.executed[-1][1][0]}
         raise AssertionError(f"Unexpected query: {self.query}")
 
     def fetchall(self):
-        if "FROM offices" in self.query:
+        if "FROM target_catalog" in self.query:
             return [
-                {"id": 2, "unit_code": "VP_ACADEMIC", "category": "vp"},
-                {"id": 3, "unit_code": "BAC", "category": "director"},
+                {"id": 2, "code": "VP_ACADEMIC", "target_type": "vice_president"},
+                {"id": 3, "code": "BAC", "target_type": "director"},
             ]
         raise AssertionError(f"Unexpected query: {self.query}")
 
@@ -57,6 +51,9 @@ class RegistrationConnection:
     def commit(self):
         self.committed = True
 
+    def rollback(self):
+        self.committed = False
+
 
 class TargetCursor:
     def __init__(self):
@@ -77,14 +74,14 @@ class RegistrationFlowTests(unittest.TestCase):
         def fake_connection(*args):
             yield connection
 
-        with patch("routes.auth.connection", fake_connection):
+        with patch("backend.routes.auth.connection", fake_connection):
             response = app.test_client().post(
                 "/api/auth/register",
                 json={
                     "email": "evaluator@capsu.edu.ph",
                     "password": "secure-password-123",
                     "position_role": "non_teaching_staff",
-                    "office_unit_codes": ["VP_ACADEMIC", "BAC"],
+                    "office_unit_codes": ["2", "3"],
                     "location_code": "MAIN",
                     "years_of_service": "1_5",
                 },
@@ -95,14 +92,20 @@ class RegistrationFlowTests(unittest.TestCase):
         self.assertTrue(connection.committed)
         queries = [query for query, _ in connection.db_cursor.executed]
         insert_query = next(query for query in queries if "INSERT INTO users" in query)
-        self.assertIn("VALUES (%s, %s, 'evaluator', %s, %s, %s, %s, %s, %s, 1)", insert_query)
+        self.assertIn("VALUES (%s, %s, 'evaluator', %s, %s, %s, %s, %s, 1)", insert_query)
         insert_params = next(
             params for query, params in connection.db_cursor.executed if "INSERT INTO users" in query
         )
-        self.assertIsNone(insert_params[5])
+        self.assertEqual(insert_params[3], "office_staff")
         self.assertEqual(
             connection.db_cursor.batch_executed,
-            [("INSERT INTO office_memberships (user_id, office_id) VALUES (%s, %s)", [(42, 2), (42, 3)])],
+            [
+                (
+                    "INSERT INTO user_office_assignments (user_id, target_id, assignment_role) "
+                    "VALUES (%s, %s, 'member')",
+                    [(42, 2), (42, 3)],
+                )
+            ],
         )
 
     def test_registration_rejects_duplicate_office_unit_selections(self):
@@ -122,14 +125,14 @@ class RegistrationFlowTests(unittest.TestCase):
         self.assertEqual(response.status_code, 400)
         self.assertIn("cannot be selected more than once", response.get_json()["error"])
 
-    def test_cycle_automatically_includes_all_active_office_and_admin_targets(self):
+    def test_cycle_automatically_includes_all_active_targets(self):
         cursor = TargetCursor()
 
         target_count = _insert_all_cycle_targets(cursor, 9)
 
         self.assertEqual(target_count, 2)
-        self.assertIn("t.target_type = 'office'", cursor.query)
-        self.assertIn("t.target_type = 'administrator'", cursor.query)
+        self.assertIn("t.active = 1", cursor.query)
+        self.assertIn("LEFT JOIN campuses", cursor.query)
         self.assertEqual(cursor.params, (9,))
 
     def test_cycle_creation_requires_at_least_one_active_target(self):
@@ -151,20 +154,19 @@ class RegistrationFlowTests(unittest.TestCase):
         with client.session_transaction() as session:
             session["user_id"] = 1
 
-        with patch("core.connection", fake_connection), patch("routes.admin.connection", fake_connection):
+        with patch("backend.core.connection", fake_connection), patch("backend.routes.admin.connection", fake_connection):
             response = client.delete("/api/admin/users/7")
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.get_json(), {"status": "deleted"})
-        self.assertEqual(connection.db_cursor.procedures, [("delete_evaluator_account", (7,))])
-        self.assertFalse(any("participation" in query or "comments" in query for query, _ in connection.db_cursor.executed))
+        self.assertTrue(any("DELETE FROM users" in query for query, _ in connection.db_cursor.executed))
+        self.assertTrue(any("SELECT submission_token FROM participation" in query for query, _ in connection.db_cursor.executed))
 
 
 class AdminCursor:
     def __init__(self):
         self.query = ""
         self.executed = []
-        self.procedures = []
 
     def execute(self, query, params=()):
         self.query = query
@@ -177,8 +179,10 @@ class AdminCursor:
             return {"role": "evaluator"}
         raise AssertionError(f"Unexpected query: {self.query}")
 
-    def callproc(self, procedure, args=()):
-        self.procedures.append((procedure, args))
+    def fetchall(self):
+        if "SELECT submission_token FROM participation" in self.query:
+            return []
+        raise AssertionError(f"Unexpected query: {self.query}")
 
     def close(self):
         pass

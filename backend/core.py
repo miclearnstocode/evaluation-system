@@ -6,6 +6,7 @@ import re
 import uuid
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
+from decimal import Decimal, InvalidOperation
 from functools import wraps
 from pathlib import Path
 from typing import Any, Callable, Iterator
@@ -15,16 +16,28 @@ from flask import Flask, current_app, jsonify, request, session
 from werkzeug.exceptions import HTTPException
 from werkzeug.security import check_password_hash, generate_password_hash
 
-from registration import derive_evaluator_group
-from database import connect as _connect, connection, fetch_all, fetch_one
-from eligibility import (
-    _cycle_user_eligible,
-    _load_cycle_target,
-    _load_rules,
-    _registration_policy_allows,
-    is_eligible,
-    rule_matches,
-)
+if __package__:
+    from .registration import derive_evaluator_group
+    from .database import connect as _connect, connection, fetch_all, fetch_one
+    from .eligibility import (
+        _cycle_user_eligible,
+        _load_cycle_target,
+        _load_rules,
+        _registration_policy_allows,
+        is_eligible,
+        rule_matches,
+    )
+else:
+    from registration import derive_evaluator_group
+    from database import connect as _connect, connection, fetch_all, fetch_one
+    from eligibility import (
+        _cycle_user_eligible,
+        _load_cycle_target,
+        _load_rules,
+        _registration_policy_allows,
+        is_eligible,
+        rule_matches,
+    )
 
 env_file = ".env.production" if os.getenv("APP_ENV") == "production" else ".env"
 load_dotenv(Path(__file__).with_name(env_file))
@@ -160,14 +173,30 @@ def validate_survey_payload(payload: Any) -> list[dict[str, Any]]:
             if IDENTIFYING_QUESTION.search(text):
                 raise ApiError("Surveys cannot ask for identifying information.")
             options = item.get("options", [])
+            score_weight = _score_config_value(item.get("score_weight", 1), "Question weight")
             if question_type in {"single_choice", "multi_choice"}:
-                if (
-                    not isinstance(options, list)
-                    or not options
-                    or any(not isinstance(option, str) or not option.strip() or len(option) > 200 for option in options)
-                    or len({option.strip() for option in options}) != len(options)
-                ):
+                if not isinstance(options, list) or not options:
                     raise ApiError("Choice questions need distinct, non-empty options.")
+                clean_options = []
+                option_labels = set()
+                for option in options:
+                    if isinstance(option, str):
+                        label, points = option, 1
+                    elif isinstance(option, dict) and isinstance(option.get("label"), str):
+                        label, points = option["label"], option.get("points", 1)
+                    else:
+                        raise ApiError("Choice questions need distinct, non-empty options.")
+                    label = label.strip()
+                    if not label or len(label) > 200 or label in option_labels:
+                        raise ApiError("Choice questions need distinct, non-empty options.")
+                    option_labels.add(label)
+                    clean_options.append(
+                        {
+                            "label": label,
+                            "points": _score_config_value(points, "Choice points"),
+                        }
+                    )
+                options = clean_options
             else:
                 options = []
             minimum = item.get("scale_min", 1)
@@ -181,7 +210,8 @@ def validate_survey_payload(payload: Any) -> list[dict[str, Any]]:
                     "text": text,
                     "type": question_type,
                     "required": bool(item.get("required", False)),
-                    "options": [option.strip() for option in options],
+                    "options": options,
+                    "score_weight": score_weight,
                     "scale_min": minimum if question_type in {"scale", "rating"} else None,
                     "scale_max": maximum if question_type in {"scale", "rating"} else None,
                     "min_label": item.get("min_label"),
@@ -194,6 +224,24 @@ def validate_survey_payload(payload: Any) -> list[dict[str, Any]]:
     return normalized
 
 
+def _score_config_value(value: Any, field: str) -> Decimal:
+    if isinstance(value, bool) or not isinstance(value, (int, float, Decimal)):
+        raise ApiError(f"{field} must be a non-negative number with at most two decimal places.")
+    try:
+        number = Decimal(str(value))
+    except InvalidOperation:
+        raise ApiError(f"{field} must be a non-negative number with at most two decimal places.") from None
+    if not number.is_finite() or number < 0 or number > Decimal("10000"):
+        raise ApiError(f"{field} must be between 0 and 10000.")
+    try:
+        rounded = number.quantize(Decimal("0.01"))
+    except InvalidOperation:
+        raise ApiError(f"{field} must be a non-negative number with at most two decimal places.") from None
+    if rounded != number:
+        raise ApiError(f"{field} must have at most two decimal places.")
+    return rounded
+
+
 def _current_user() -> dict[str, Any] | None:
     user_id = session.get("user_id")
     if not user_id:
@@ -202,8 +250,8 @@ def _current_user() -> dict[str, Any] | None:
         cursor = conn.cursor(dictionary=True)
         user = fetch_one(
             cursor,
-            "SELECT id, email, role, campus_id, evaluator_group, position_role, office_unit_code, "
-            "is_central_staff, active "
+            "SELECT id, email, role, campus_id, evaluator_group, position_role, "
+            "years_of_service, is_central_staff, active "
             "FROM users WHERE id = %s",
             (user_id,),
         )
@@ -270,22 +318,27 @@ def _cycle_is_closed(cycle: dict[str, Any]) -> bool:
     return cycle["status"] == "closed" and cycle["closes_at"] <= _utcnow_naive()
 
 
-def _load_survey(cursor: Any, survey_id: int) -> dict[str, Any]:
+def _load_survey(cursor: Any, survey_id: int, include_scoring: bool = False) -> dict[str, Any]:
     survey = fetch_one(cursor, "SELECT id, title, description, status FROM surveys WHERE id = %s", (survey_id,))
     if not survey:
         raise ApiError("Survey not found.", 404)
     sections = fetch_all(cursor, "SELECT id, title, sort_order FROM sections WHERE survey_id = %s ORDER BY sort_order, id", (survey_id,))
     for section in sections:
+        score_column = ", weight AS score_weight" if include_scoring else ""
         questions = fetch_all(
             cursor,
-            "SELECT id, type, question_text, required, sort_order, scale_min, scale_max, min_label, max_label "
-            "FROM questions WHERE section_id = %s AND archived = 0 ORDER BY sort_order, id",
+            "SELECT id, question_type AS type, prompt AS question_text, is_required AS required, "
+            "sort_order, scale_min, scale_max, min_label, max_label"
+            f"{score_column} "
+            "FROM questions WHERE section_id = %s AND is_archived = 0 ORDER BY sort_order, id",
             (section["id"],),
         )
         for question in questions:
+            points_column = ", points" if include_scoring else ""
             question["options"] = fetch_all(
                 cursor,
-                "SELECT id, label, sort_order FROM question_options WHERE question_id = %s ORDER BY sort_order, id",
+                "SELECT id, option_text AS label, option_key, sort_order"
+                f"{points_column} FROM question_options WHERE question_id = %s ORDER BY sort_order, id",
                 (question["id"],),
             )
         section["questions"] = questions
@@ -303,8 +356,9 @@ def _insert_survey_content(cursor: Any, survey_id: int, sections: list[dict[str,
         for question_order, question in enumerate(section["questions"]):
             cursor.execute(
                 "INSERT INTO questions "
-                "(survey_id, section_id, type, question_text, required, sort_order, scale_min, scale_max, min_label, max_label) "
-                "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
+                "(survey_id, section_id, question_type, prompt, is_required, sort_order, scale_min, scale_max, "
+                "weight, min_label, max_label) "
+                "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
                 (
                     survey_id,
                     section_id,
@@ -314,15 +368,18 @@ def _insert_survey_content(cursor: Any, survey_id: int, sections: list[dict[str,
                     question_order,
                     question["scale_min"],
                     question["scale_max"],
+                    question["score_weight"],
                     question["min_label"],
                     question["max_label"],
                 ),
             )
             question_id = cursor.lastrowid
-            for option_order, label in enumerate(question["options"]):
+            for option_order, option in enumerate(question["options"]):
                 cursor.execute(
-                    "INSERT INTO question_options (question_id, label, sort_order) VALUES (%s, %s, %s)",
-                    (question_id, label, option_order),
+                    "INSERT INTO question_options "
+                    "(question_id, option_key, option_text, sort_order, points) "
+                    "VALUES (%s, %s, %s, %s, %s)",
+                    (question_id, str(option_order + 1), option["label"], option_order, option["points"]),
                 )
 
 
@@ -337,7 +394,7 @@ def _audit(cursor: Any, user: dict[str, Any], action: str, entity: str, entity_i
 def _insert_default_rules(cursor: Any, cycle_id: int, allow_same_campus: bool) -> None:
     cursor.executemany(
         "INSERT INTO eligibility_rules "
-        "(cycle_id, evaluator_is_central, evaluator_group, target_is_central, same_campus, effect) "
+        "(cycle_id, evaluator_is_central, evaluator_group, require_target_central, require_same_campus, action) "
         "VALUES (%s, %s, %s, %s, %s, %s)",
         [(cycle_id, None, None, None, None, "allow")],
     )
@@ -347,15 +404,12 @@ def _insert_all_cycle_targets(cursor: Any, cycle_id: int) -> int:
     cursor.execute(
         "INSERT INTO cycle_targets (cycle_id, target_id) "
         "SELECT %s, t.id FROM targets t "
-        "JOIN campuses c ON c.id = t.campus_id AND c.active = 1 "
-        "LEFT JOIN offices o ON o.id = t.office_id "
-        "LEFT JOIN administrators a ON a.id = t.administrator_id "
-        "WHERE (t.target_type = 'office' AND o.active = 1 OR "
-        "t.target_type = 'administrator' AND a.active = 1)",
+        "LEFT JOIN campuses c ON c.id = t.campus_id "
+        "WHERE t.active = 1 AND (t.campus_id IS NULL OR c.active = 1)",
         (cycle_id,),
     )
     if cursor.rowcount == 0:
-        raise ApiError("Add at least one active office or administrator target before creating a cycle.")
+        raise ApiError("Add at least one active evaluation target before creating a cycle.")
     return cursor.rowcount
 
 

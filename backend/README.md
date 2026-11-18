@@ -3,11 +3,13 @@
 ## Database
 
 1. Start MySQL in XAMPP.
-2. In phpMyAdmin, import `schema.sql`. It creates the `evaluation_system` database.
+2. In phpMyAdmin, import `database-schema.sql`. It creates the `evaluation_system` database and the new target-based schema.
 3. Configure `backend/.env` for local development and set a long random `SECRET_KEY`.
-4. In phpMyAdmin, select `evaluation_system` and import `seed_capsu_data.sql`. The last query reports counts so you can verify the seeded records.
+4. Run `python backend\seed_admin.py` twice to create two distinct super-admin accounts. Add campuses and evaluation targets from the admin catalog pages.
 
-For an existing database, import `migrate_registration_options.sql`, `migrate_evaluator_answers.sql`, `migrate_delete_account_answers.sql`, and `seed_capsu_data.sql` to add the database-backed registration choices and individual-answer storage. If you already created the earlier token-linked `evaluator_answers` draft table, import `migrate_evaluator_answers_private.sql` instead of `migrate_evaluator_answers.sql`. If `eval_cycles.target_type` is missing, import `migrate_cycle_target_type.sql` first; then import `migrate_cycle_all_targets.sql` so each cycle can include offices and administrators together.
+For a visual relationship diagram and explanations of every table, view, and stored procedure, see [DATABASE_SCHEMA.md](DATABASE_SCHEMA.md).
+
+`database-schema.sql` is a fresh-install schema, not an in-place migration. Do not import it over a database containing existing tables or data. Back up the existing database and plan a data migration before switching an existing installation.
 
 ## Install and run
 
@@ -17,9 +19,9 @@ From the repository root in PowerShell:
 py -m venv backend\.venv
 .\backend\.venv\Scripts\Activate.ps1
 python -m pip install -r backend\requirements.txt
-python -m backend.seed_admin
-python -m backend.seed_admin
-python -m backend.app
+python backend\seed_admin.py
+python backend\seed_admin.py
+python backend\app.py
 ```
 
 Each admin seed run prompts for an email and a password of at least 12 characters. Create two distinct super-admin accounts. The API listens on `127.0.0.1:5000`.
@@ -36,9 +38,9 @@ Run `npm run build` from the repository root. Next.js writes the static site to 
 
 The static frontend does not host the Flask API. Configure Bluehost or your API host to serve `/api/*` at `https://gsu.capsu.edu.ph`, or set `NEXT_PUBLIC_API_BASE_URL` in `.env.production` to the actual API origin before building. The API's `FRONTEND_ORIGINS` must include `https://gsu.capsu.edu.ph`.
 
-Visit `/register` or select **Create evaluator account** on the sign-in page. Registration is limited to `@capsu.edu.ph` addresses and activates the account immediately. Choose the role, up to three Office/Unit memberships, campus/location, and service range. Registration choices are loaded from the database, and the backend stores memberships in `office_memberships` and derives which targets the evaluator can access.
+Visit `/register` or select **Create evaluator account** on the sign-in page. Registration is limited to `@capsu.edu.ph` addresses and activates the account immediately. Choose the role, up to three target assignments, campus/location, and service range. Role and service-range choices are provided by the backend; active campuses and targets come from the database. Assignments are stored in `user_office_assignments`.
 
-The **Office Being Evaluated** list contains eligible targets in an open evaluation cycle. Create and publish a question survey, then choose the target type (office or administrator) when creating and opening a cycle.
+The **Office Being Evaluated** list contains eligible targets in an open evaluation cycle. Create and publish a question survey, then open a cycle to include all active targets from the six target categories.
 
 ## Backend layout
 
@@ -46,7 +48,7 @@ The **Office Being Evaluated** list contains eligible targets in an open evaluat
 - `routes/auth.py`, `routes/admin.py`, and `routes/evaluator.py` handle their respective HTTP endpoints.
 - `database.py` owns MySQL connections and query helpers.
 - `eligibility.py` applies cycle rules and profile-based target eligibility.
-- `registration.py` defines CAPSU role, unit, location, and administrator seed data.
+- `registration.py` derives evaluator groups from the selected role and target assignments.
 - `core.py` provides shared validation and API helpers to route modules.
 
 ## API groups
@@ -59,23 +61,19 @@ The **Office Being Evaluated** list contains eligible targets in an open evaluat
 - `GET/POST /api/admin/cycles` plus rule, open, and close actions
 - `GET /api/evaluator/targets`, `GET /api/evaluator/targets/{id}/form`
 - `POST /api/evaluator/submit` (final; response body and user are not logged)
-- `GET /api/admin/participation`, `/results`, `/comments`, `/audit-log`
+- `GET /api/admin/participation`, `/submissions`, `/results`, `/comments`, `/audit-log`
+- `POST /api/admin/submissions/review`, `DELETE /api/admin/submissions`
 - `POST /api/admin/comments/{id}/moderate`
 
 ## Production privacy and database permissions
 
-Participation and evaluator answers are stored separately. `evaluator_answers` contains random response/answer IDs, but no evaluator email, user ID, or participation token. Admin result queries may show individual answers without identity; never return those random IDs or join them to `participation`. The identity-to-answer mapping remains in the restricted `submission_contributions` ledger. The admin DB account must not have `SELECT` on `participation` or `submission_contributions`; grant it `SELECT` on `participation_counts` and `evaluator_answers`. It also needs `EXECUTE` on the `delete_evaluator_account` stored procedure. Create the procedure by running `schema.sql` as the database owner, then grant the app admin user permission, for example:
+The participation ledger stores the evaluator account and a random submission token. Answers, comments, and score summaries refer to that token so they can be reviewed and retracted, but contain no user ID or email. The review endpoint queries answer/comment rows by token without joining `participation` or `users`; it redacts email addresses from free text and never returns the token with answer content. The delete endpoint retracts aggregate counts and deletes the participation row, which cascades to its linked answer, comment, and score rows. The account deletion path performs the same retraction for each of the evaluator's submissions.
 
-```sql
-GRANT SELECT ON evaluation_system.evaluator_answers
-  TO 'evaluation_admin'@'localhost';
-GRANT EXECUTE ON PROCEDURE evaluation_system.delete_evaluator_account
-  TO 'evaluation_admin'@'localhost';
-```
+The admin database account needs the permissions required by admin endpoints, including participation-token listing/deletion and answer/comment review. Restrict direct database access because the token can link a submission back to a participation row. The submit account needs setup-table reads and write access for participation, answers, scores, tallies, counts, and comments. Configure these separately with `ADMIN_DB_*` and `SUBMIT_DB_*`.
 
-The procedure retracts the evaluator's aggregate contributions, individual answers, and comments, then removes their account and participation rows. It returns no response content. The submit account needs the setup-table reads used to validate eligibility and insert access to the ledger, individual answers, tallies, response counts, and comments. Configure these separately using `ADMIN_DB_*` and `SUBMIT_DB_*`.
+Survey scoring is configurable: scale/rating and Yes answers use the selected value multiplied by the question weight; choice questions use configured option points; text answers are unscored. Section scores are summed for the total, and the mean is the total divided by the number of sections.
 
-The survey builder creates question sets only. Select the evaluation target type (office or administrator) when creating an evaluation cycle. On an existing installation, run `migrate_cycle_target_type.sql` once after backing up the database. It moves existing survey target types onto their cycles and removes the obsolete email-verification fields.
+The survey builder creates question sets only. Evaluation cycles can include every active target, with eligibility controlled by cycle rules, campus, central status, evaluator role, and target assignments.
 
 Disable access/request logging for `/api/evaluator/submit` at every production proxy and server layer, and do not log its body, IP, user agent, or authenticated user. Restrict MySQL logs and backups. These controls reduce linkage but do not prevent timing correlation by a fully privileged server or database operator. Individual results are released after the first response as configured; free-text answers may identify their author by content, so email addresses are redacted before results are returned.
 
