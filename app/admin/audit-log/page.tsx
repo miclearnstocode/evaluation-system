@@ -12,6 +12,12 @@ type AuditEntry = {
   created_at: string;
 };
 
+const manilaDateFormatter = new Intl.DateTimeFormat("en-PH", {
+  dateStyle: "medium",
+  timeStyle: "short",
+  timeZone: "Asia/Manila",
+});
+
 export default function AdminAuditLogPage() {
   const [items, setItems] = useState<AuditEntry[]>([]);
   const [loading, setLoading] = useState(true);
@@ -45,7 +51,7 @@ export default function AdminAuditLogPage() {
         <table className="w-full text-left text-sm">
           <thead>
             <tr className="bg-slate-50 text-[#1F3A5F]">
-              <th className="px-5 py-4 font-semibold">Date</th>
+              <th className="px-5 py-4 font-semibold">Date (Manila time)</th>
               <th className="px-5 py-4 font-semibold">Administrator</th>
               <th className="px-5 py-4 font-semibold">Action</th>
               <th className="px-5 py-4 font-semibold">Record</th>
@@ -57,7 +63,9 @@ export default function AdminAuditLogPage() {
             {!loading && !error && !items.length && <tr><td colSpan={5} className="px-5 py-6 text-slate-500">No audit entries yet.</td></tr>}
             {items.map((item) => (
               <tr key={item.id} className="border-t border-slate-100">
-                <td className="whitespace-nowrap px-5 py-4 text-slate-600">{new Date(`${item.created_at}Z`).toLocaleString()}</td>
+                <td className="whitespace-nowrap px-5 py-4 text-slate-600">
+                  {manilaDateFormatter.format(new Date(item.created_at))}
+                </td>
                 <td className="px-5 py-4 text-slate-700">{item.admin_email}</td>
                 <td className="px-5 py-4 font-medium capitalize text-slate-800">{item.action.replaceAll("_", " ")}</td>
                 <td className="px-5 py-4 capitalize text-slate-600">{item.entity.replaceAll("_", " ")}</td>

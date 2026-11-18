@@ -1,3 +1,5 @@
+import json
+
 from flask import Blueprint
 
 from core import *
@@ -137,7 +139,7 @@ def submit_evaluation():
                 for section in survey["sections"]
                 for question in section["questions"]
             ]
-            tallies, comments = validate_questions(questions, payload.get("answers"))
+            tallies, comments, individual_answers = validate_questions(questions, payload.get("answers"))
             submission_token = str(uuid.uuid4())
             stage = "participation"
             cursor.execute(
@@ -147,6 +149,40 @@ def submit_evaluation():
                 (submission_token, user["id"], cycle_id, target_id, _utcnow_naive().date()),
             )
             stage = "answers"
+            if individual_answers:
+                response_id = str(uuid.uuid4())
+                answer_contributions = [
+                    (
+                        str(uuid.uuid4()),
+                        question_id,
+                        answer_value,
+                    )
+                    for question_id, answer_value in individual_answers
+                ]
+                cursor.executemany(
+                    "INSERT INTO evaluator_answers "
+                    "(answer_id, response_id, cycle_id, target_id, question_id, answer_value) "
+                    "VALUES (%s, %s, %s, %s, %s, %s)",
+                    [
+                        (
+                            answer_id,
+                            response_id,
+                            cycle_id,
+                            target_id,
+                            question_id,
+                            json.dumps(answer_value, ensure_ascii=False),
+                        )
+                        for answer_id, question_id, answer_value in answer_contributions
+                    ],
+                )
+                cursor.executemany(
+                    "INSERT INTO submission_contributions "
+                    "(submission_token, question_id, answer_id) VALUES (%s, %s, %s)",
+                    [
+                        (submission_token, question_id, answer_id)
+                        for answer_id, question_id, _ in answer_contributions
+                    ],
+                )
             for question_id, option_key in tallies:
                 cursor.execute(
                     "INSERT INTO answer_tallies "

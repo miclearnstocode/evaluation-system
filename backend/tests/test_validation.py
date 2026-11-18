@@ -14,12 +14,16 @@ class SubmissionValidationTests(unittest.TestCase):
         ]
 
     def test_valid_answers_become_aggregate_values_and_standalone_comments(self):
-        tallies, comments = validate_questions(
+        tallies, comments, individual_answers = validate_questions(
             self.questions,
             {"1": 4, "2": 21, "3": [31, 32], "4": True, "5": "  Nice service  "},
         )
         self.assertEqual(tallies, [(1, 4), (2, 21), (3, 31), (3, 32), (4, 1)])
         self.assertEqual(comments, [(5, "Nice service")])
+        self.assertEqual(
+            individual_answers,
+            [(1, 4), (2, 21), (3, [31, 32]), (4, 1), (5, "Nice service")],
+        )
 
     def test_rejects_unknown_question_and_invalid_options(self):
         with self.assertRaises(ApiError):

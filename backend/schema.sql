@@ -173,6 +173,21 @@ CREATE TABLE IF NOT EXISTS participation (
   CONSTRAINT fk_participation_target FOREIGN KEY (target_id) REFERENCES targets(id)
 );
 
+-- Answers have random IDs and never contain evaluator identity or participation tokens.
+CREATE TABLE IF NOT EXISTS evaluator_answers (
+  answer_id CHAR(36) PRIMARY KEY,
+  response_id CHAR(36) NOT NULL,
+  cycle_id INT NOT NULL,
+  target_id INT NOT NULL,
+  question_id INT NOT NULL,
+  answer_value JSON NOT NULL,
+  KEY by_response (response_id),
+  KEY by_target (cycle_id, target_id, question_id),
+  CONSTRAINT fk_evaluator_answers_cycle FOREIGN KEY (cycle_id) REFERENCES eval_cycles(id),
+  CONSTRAINT fk_evaluator_answers_target FOREIGN KEY (target_id) REFERENCES targets(id),
+  CONSTRAINT fk_evaluator_answers_question FOREIGN KEY (question_id) REFERENCES questions(id)
+);
+
 -- Tallies contain counts only: no user identifier, timestamp, or submission id.
 CREATE TABLE IF NOT EXISTS answer_tallies (
   cycle_id INT NOT NULL,
@@ -216,14 +231,18 @@ CREATE TABLE IF NOT EXISTS submission_contributions (
   question_id INT NOT NULL,
   option_key INT NULL,
   comment_id CHAR(36) NULL,
+  answer_id CHAR(36) NULL,
   UNIQUE KEY one_answer_contribution (submission_token, question_id, option_key),
   UNIQUE KEY one_comment_contribution (comment_id),
+  UNIQUE KEY one_stored_answer (answer_id),
   CONSTRAINT fk_submission_contributions_ledger
     FOREIGN KEY (submission_token) REFERENCES participation(submission_token) ON DELETE CASCADE,
   CONSTRAINT fk_submission_contributions_question
     FOREIGN KEY (question_id) REFERENCES questions(id),
   CONSTRAINT fk_submission_contributions_comment
-    FOREIGN KEY (comment_id) REFERENCES comments(id) ON DELETE CASCADE
+    FOREIGN KEY (comment_id) REFERENCES comments(id) ON DELETE CASCADE,
+  CONSTRAINT fk_submission_contributions_answer
+    FOREIGN KEY (answer_id) REFERENCES evaluator_answers(answer_id) ON DELETE CASCADE
 );
 
 CREATE TABLE IF NOT EXISTS office_memberships (
@@ -321,6 +340,12 @@ BEGIN
   DELETE cm
   FROM comments cm
   JOIN submission_contributions sc ON sc.comment_id = cm.id
+  JOIN participation p ON p.submission_token = sc.submission_token
+  WHERE p.user_id = p_user_id;
+
+  DELETE ea
+  FROM evaluator_answers ea
+  JOIN submission_contributions sc ON sc.answer_id = ea.answer_id
   JOIN participation p ON p.submission_token = sc.submission_token
   WHERE p.user_id = p_user_id;
 

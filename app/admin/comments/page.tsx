@@ -17,7 +17,6 @@ export default function AdminCommentsPage() {
   const [targetId, setTargetId] = useState("");
   const [status, setStatus] = useState<ModerationStatus>("pending");
   const [comments, setComments] = useState<Comment[]>([]);
-  const [minimum, setMinimum] = useState(5);
   const [loadingOptions, setLoadingOptions] = useState(true);
   const [loadingComments, setLoadingComments] = useState(false);
   const [savingId, setSavingId] = useState("");
@@ -31,10 +30,10 @@ export default function AdminCommentsPage() {
     ])
       .then(([cycleData, targetData]) => {
         if (!active) return;
-        const closedCycles = cycleData.items.filter((cycle) => cycle.status === "closed");
-        setCycles(closedCycles);
+        const availableCycles = cycleData.items.filter((cycle) => cycle.status === "open" || cycle.status === "closed");
+        setCycles(availableCycles);
         setTargets(targetData.items);
-        if (closedCycles.length) setCycleId(String(closedCycles[0].id));
+        if (availableCycles.length) setCycleId(String(availableCycles[0].id));
       })
       .catch((requestError: Error) => {
         if (active) setError(requestError.message);
@@ -65,13 +64,12 @@ export default function AdminCommentsPage() {
     let active = true;
     setLoadingComments(true);
     setError("");
-    apiFetch<{ items: Comment[]; minimum: number }>(
+    apiFetch<{ items: Comment[] }>(
       `/api/admin/comments?cycle_id=${encodeURIComponent(cycleId)}&target_id=${encodeURIComponent(targetId)}&status=${status}`,
     )
       .then((data) => {
         if (!active) return;
         setComments(data.items);
-        setMinimum(data.minimum);
       })
       .catch((requestError: Error) => {
         if (active) setError(requestError.message);
@@ -105,19 +103,19 @@ export default function AdminCommentsPage() {
       <div>
         <p className="text-sm font-medium text-teal-800">Content review</p>
         <h1 className="mt-1 text-3xl font-bold tracking-tight text-[#1F3A5F]">Comment moderation</h1>
-        <p className="mt-2 text-sm text-slate-600">Comments are shown only after their response group meets the privacy threshold.</p>
+        <p className="mt-2 text-sm text-slate-600">Comments appear as evaluators submit them, including while a cycle is open. Evaluator identities are not shown.</p>
       </div>
 
       <div className="grid gap-4 rounded-xl border border-slate-200 bg-white p-5 shadow-sm sm:grid-cols-2">
         <label className="text-sm font-medium text-slate-700">
-          Closed evaluation cycle
+          Evaluation cycle
           <select
             value={cycleId}
             onChange={(event) => setCycleId(event.target.value)}
             disabled={loadingOptions}
             className="mt-1.5 block w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5"
           >
-            <option value="">Select a closed cycle</option>
+            <option value="">Select a cycle</option>
             {cycles.map((cycle) => <option key={cycle.id} value={cycle.id}>{cycle.name}</option>)}
           </select>
         </label>
@@ -153,14 +151,13 @@ export default function AdminCommentsPage() {
             </button>
           ))}
         </div>
-        <p className="text-xs text-slate-500">Privacy threshold: {minimum} responses</p>
       </div>
 
       {error && <p role="alert" className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</p>}
       {loadingComments && <p role="status" className="text-sm text-slate-500">Loading comments…</p>}
       {!loadingOptions && !cycles.length && !error && (
         <p className="rounded-lg border border-slate-200 bg-white px-5 py-6 text-sm text-slate-600">
-          Comments are available for review after a cycle closes.
+          No open or closed evaluation cycles are available for comment review.
         </p>
       )}
       {!loadingComments && cycleId && targetId && !comments.length && !error && (

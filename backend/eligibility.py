@@ -53,13 +53,15 @@ def _registration_policy_allows(cursor: Any, user: dict[str, Any], target: dict[
 
     office_unit_code = user.get("office_unit_code")
     base_office = (
-        fetch_one(cursor, "SELECT id FROM offices WHERE unit_code = %s", (office_unit_code,))
+        fetch_one(cursor, "SELECT id, unit_code FROM offices WHERE unit_code = %s", (office_unit_code,))
         if office_unit_code
         else None
     )
     memberships = fetch_all(
         cursor,
-        "SELECT office_id FROM office_memberships WHERE user_id = %s",
+        "SELECT o.id AS office_id, o.unit_code FROM office_memberships om "
+        "JOIN offices o ON o.id = om.office_id "
+        "WHERE om.user_id = %s AND o.active = 1",
         (user["id"],),
     )
     head = fetch_one(
@@ -68,15 +70,22 @@ def _registration_policy_allows(cursor: Any, user: dict[str, Any], target: dict[
         "FROM office_head_claims hc JOIN offices o ON o.id = hc.office_id WHERE hc.user_id = %s",
         (user["id"],),
     )
-    own_offices = {row["office_id"] for row in memberships}
+    member_offices = {
+        (row["office_id"], row["unit_code"])
+        for row in memberships
+        if row["unit_code"]
+    }
+    own_offices = set(member_offices)
     if base_office:
-        own_offices.add(base_office["id"])
+        own_offices.add((base_office["id"], base_office["unit_code"]))
     if head:
-        own_offices.add(head["office_id"])
+        own_offices.add((head["office_id"], head["unit_code"]))
 
+    office_access = member_offices if group == "office_staff" else own_offices
+    target_office = (target_office_id, target_unit)
     target_administrator_id = target.get("target_administrator_id")
-    if target["target_type"] == "office" and target_office_id in own_offices:
-        return not head or target_office_id != head["office_id"]
+    if target["target_type"] == "office" and target_office in office_access:
+        return not head or target_office != (head["office_id"], head["unit_code"])
     if head and target_administrator_id == head["administrator_id"]:
         return False
     if target_administrator_id:
@@ -89,12 +98,15 @@ def _registration_policy_allows(cursor: Any, user: dict[str, Any], target: dict[
         )
         if supervisor and supervisor["administrator_id"] == target_administrator_id:
             return True
-    if target_office_id in {row["office_id"] for row in memberships}:
+    if target_office in member_offices:
         return True
+
+    if group == "office_staff":
+        return False
 
     target_category = unit_category(cursor, target_unit)
     if target_category == "vp":
-        if group in {"student_leader", "office_staff"}:
+        if group == "student_leader":
             return True
         if head and unit_category(cursor, head["unit_code"]) == "campus_head":
             return True
@@ -105,12 +117,12 @@ def _registration_policy_allows(cursor: Any, user: dict[str, Any], target: dict[
     if target_category == "campus_head":
         if group in {"faculty", "student_leader"} and user.get("campus_id") == target.get("campus_id"):
             return True
-        return group == "campus_staff" and target_office_id in own_offices
+        return group == "campus_staff" and target_office in own_offices
 
     if target_category == "director":
         if group == "faculty" and target_unit == "RESEARCH_OFFICE":
             return True
-        if group == "office_staff" and target_office_id in own_offices:
+        if group == "office_staff" and target_office in own_offices:
             return True
     return False
 

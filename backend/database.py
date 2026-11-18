@@ -9,7 +9,8 @@ import mysql.connector
 from dotenv import load_dotenv
 from flask import current_app
 
-load_dotenv(Path(__file__).with_name(".env"))
+env_file = ".env.production" if os.getenv("APP_ENV") == "production" else ".env"
+load_dotenv(Path(__file__).with_name(env_file))
 
 
 def connect(role: str):

@@ -4,7 +4,8 @@ from pathlib import Path
 import mysql.connector
 from dotenv import load_dotenv
 
-load_dotenv(Path(__file__).with_name(".env"))
+env_file = ".env.production" if os.getenv("APP_ENV") == "production" else ".env"
+load_dotenv(Path(__file__).with_name(env_file))
 
 
 def main() -> None:

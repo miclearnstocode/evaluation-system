@@ -1,25 +1,19 @@
 import type { NextConfig } from "next";
 
-const backendApiUrl = (process.env.BACKEND_API_URL ?? "http://127.0.0.1:5000").replace(
-  /\/$/,
-  "",
-);
-
 const nextConfig: NextConfig = {
-  async rewrites() {
-    return [
+  output: "export",
+  trailingSlash: true,
+  images: {
+    unoptimized: true,
+    remotePatterns: [
       {
-        source: "/api/:path*",
-        destination: `${backendApiUrl}/api/:path*`,
+        protocol: 'https',
+        hostname: 'res.cloudinary.com',
+        port: '',
+        pathname: '/**',
       },
-    ];
+    ],
   },
-  /* config options here */
-  experimental: {
-    agentFeedback: true,
-  },
-  cacheComponents: true,
-  partialPrefetching: true,
   turbopack: {
     rules: {
       "*.css": {

@@ -13,6 +13,7 @@ type ResultQuestion = {
   mean: number | null;
   distribution: Distribution[];
 };
+type IndividualAnswer = { question: string; answer: number | string | string[] };
 type Results = {
   released: boolean;
   minimum: number;
@@ -20,6 +21,7 @@ type Results = {
   cycle?: { id: number; name: string };
   target?: { id: number; name: string };
   questions?: ResultQuestion[];
+  individual_responses?: { answers: IndividualAnswer[] }[];
 };
 
 export default function AdminResultsPage() {
@@ -43,7 +45,13 @@ export default function AdminResultsPage() {
         const availableCycles = cycleData.items.filter((cycle) => cycle.status === "open" || cycle.status === "closed");
         setCycles(availableCycles);
         setTargets(targetData.items);
-        if (availableCycles.length) setCycleId(String(availableCycles[0].id));
+        if (availableCycles.length) {
+          const firstCycleId = String(availableCycles[0].id);
+          setCycleId(firstCycleId);
+          const firstTarget = targetData.items.find((target) => availableCycles[0].target_ids.includes(target.id));
+          setTargetId(firstTarget ? String(firstTarget.id) : "");
+          setLoadingResults(Boolean(firstTarget));
+        }
       })
       .catch((requestError: Error) => {
         if (active) setError(requestError.message);
@@ -63,31 +71,34 @@ export default function AdminResultsPage() {
   );
 
   useEffect(() => {
-    setTargetId(availableTargets.length ? String(availableTargets[0].id) : "");
-    setResults(null);
-  }, [cycleId, availableTargets]);
-
-  useEffect(() => {
     if (!cycleId || !targetId) return;
     let active = true;
-    setLoadingResults(true);
-    setError("");
-    apiFetch<Results>(
-      `/api/admin/results?cycle_id=${encodeURIComponent(cycleId)}&target_id=${encodeURIComponent(targetId)}`,
-    )
-      .then((data) => {
-        if (active) setResults(data);
-      })
-      .catch((requestError: Error) => {
-        if (active) setError(requestError.message);
-      })
-      .finally(() => {
-        if (active) setLoadingResults(false);
-      });
+    const loadResults = (initialLoad = false) => {
+      apiFetch<Results>(
+        `/api/admin/results?cycle_id=${encodeURIComponent(cycleId)}&target_id=${encodeURIComponent(targetId)}`,
+      )
+        .then((data) => {
+          if (active) setResults(data);
+        })
+        .catch((requestError: Error) => {
+          if (active) {
+            setError(requestError.message);
+            setLoadingResults(false);
+          }
+        })
+        .finally(() => {
+          if (active && initialLoad) setLoadingResults(false);
+        });
+    };
+    loadResults(true);
+    const refreshTimer = selectedCycle?.status === "open"
+      ? window.setInterval(() => loadResults(), 15000)
+      : undefined;
     return () => {
       active = false;
+      if (refreshTimer !== undefined) window.clearInterval(refreshTimer);
     };
-  }, [cycleId, targetId]);
+  }, [cycleId, targetId, selectedCycle?.status]);
 
   return (
     <div className="space-y-6">
@@ -101,7 +112,16 @@ export default function AdminResultsPage() {
           Evaluation cycle
           <select
             value={cycleId}
-            onChange={(event) => setCycleId(event.target.value)}
+            onChange={(event) => {
+              const nextCycleId = event.target.value;
+              const nextCycle = cycles.find((cycle) => String(cycle.id) === nextCycleId);
+              const nextTargets = targets.filter((target) => nextCycle?.target_ids.includes(target.id));
+              setCycleId(nextCycleId);
+              setTargetId(nextTargets.length ? String(nextTargets[0].id) : "");
+              setResults(null);
+              setLoadingResults(Boolean(nextTargets.length));
+              setError("");
+            }}
             disabled={loadingOptions}
             className="mt-1.5 block w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5"
           >
@@ -113,7 +133,12 @@ export default function AdminResultsPage() {
           Office or administrator
           <select
             value={targetId}
-            onChange={(event) => setTargetId(event.target.value)}
+            onChange={(event) => {
+              setTargetId(event.target.value);
+              setResults(null);
+              setLoadingResults(Boolean(event.target.value));
+              setError("");
+            }}
             disabled={!availableTargets.length}
             className="mt-1.5 block w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5"
           >
@@ -136,9 +161,9 @@ export default function AdminResultsPage() {
       )}
       {!loadingResults && results && !results.released && (
         <div role="status" className="rounded-xl border border-amber-200 bg-amber-50 p-5">
-          <h2 className="font-semibold text-amber-950">Results are privacy-suppressed</h2>
+          <h2 className="font-semibold text-amber-950">Waiting for the first response</h2>
           <p className="mt-1 text-sm text-amber-900">
-            This target has {results.response_count} responses; at least {results.minimum} are required to release results.
+            Results for this target will appear as soon as the first evaluator submits.
           </p>
         </div>
       )}
@@ -149,7 +174,7 @@ export default function AdminResultsPage() {
             <p className="text-sm text-slate-500">{results.cycle?.name}{selectedCycle ? ` · ${selectedCycle.status}` : ""}</p>
             <h2 className="mt-1 text-xl font-semibold text-[#1F3A5F]">{results.target?.name}</h2>
             <p className="mt-2 text-sm text-slate-600">
-              {results.response_count} total responses · at least {results.minimum} are required to protect evaluator privacy
+              {results.response_count} total responses
             </p>
           </div>
           {results.questions?.map((question) => {
@@ -186,6 +211,31 @@ export default function AdminResultsPage() {
               </article>
             );
           })}
+          {!!results.individual_responses?.length && (
+            <section className="space-y-4">
+              <div>
+                <h2 className="text-xl font-semibold text-[#1F3A5F]">Individual submitted evaluations</h2>
+                <p className="mt-1 text-sm text-slate-500">
+                  Responses are shown without evaluator identity. Email addresses in written answers are redacted.
+                </p>
+              </div>
+              {results.individual_responses.map((response, index) => (
+                <article key={index} className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+                  <h3 className="font-semibold text-[#1F3A5F]">Anonymous response {index + 1}</h3>
+                  <dl className="mt-3 divide-y divide-slate-100">
+                    {response.answers.map((answer, answerIndex) => (
+                      <div key={`${answer.question}-${answerIndex}`} className="grid gap-1 py-3 sm:grid-cols-[minmax(12rem,1fr)_2fr] sm:gap-4">
+                        <dt className="text-sm font-medium text-slate-600">{answer.question}</dt>
+                        <dd className="whitespace-pre-wrap text-sm text-slate-800">
+                          {Array.isArray(answer.answer) ? answer.answer.join(", ") : answer.answer}
+                        </dd>
+                      </div>
+                    ))}
+                  </dl>
+                </article>
+              ))}
+            </section>
+          )}
         </section>
       )}
     </div>

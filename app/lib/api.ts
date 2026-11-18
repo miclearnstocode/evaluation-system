@@ -4,8 +4,13 @@ type ApiResponse = {
 
 export async function apiFetch<T>(path: string, init: RequestInit = {}): Promise<T> {
   let response: Response;
+  const configuredApiBaseUrl = process.env.NEXT_PUBLIC_API_BASE_URL?.replace(/\/+$/, "");
+  const localApiHost =
+    typeof window !== "undefined" && window.location.hostname === "127.0.0.1" ? "127.0.0.1" : "localhost";
+  const apiBaseUrl =
+    configuredApiBaseUrl || (process.env.NODE_ENV === "development" ? `http://${localApiHost}:5000` : "");
   try {
-    response = await fetch(path, {
+    response = await fetch(`${apiBaseUrl}${path}`, {
       ...init,
       cache: "no-store",
       credentials: "include",
@@ -17,7 +22,7 @@ export async function apiFetch<T>(path: string, init: RequestInit = {}): Promise
   } catch (error) {
     if (error instanceof TypeError) {
       throw new Error(
-        "Cannot connect to the backend. Start the Flask API and check BACKEND_API_URL in next.config.ts.",
+        "Cannot connect to the backend. Check NEXT_PUBLIC_API_BASE_URL in the frontend environment file.",
       );
     }
     throw error;

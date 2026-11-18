@@ -6,7 +6,8 @@ import mysql.connector
 from dotenv import load_dotenv
 from werkzeug.security import generate_password_hash
 
-load_dotenv(os.path.join(os.path.dirname(__file__), ".env"))
+env_file = ".env.production" if os.getenv("APP_ENV") == "production" else ".env"
+load_dotenv(os.path.join(os.path.dirname(__file__), env_file))
 
 
 def main() -> None:

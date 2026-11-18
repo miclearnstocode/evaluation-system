@@ -37,7 +37,7 @@ class RegistrationProfileTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             derive_evaluator_group("unknown_role", [])
 
-    def test_registered_office_staff_can_evaluate_vp_target(self):
+    def test_office_staff_cannot_evaluate_an_unassigned_vp_target(self):
         user = {"id": 8, "campus_id": 1, "evaluator_group": "office_staff", "office_unit_code": "BAC"}
         target = {
             "target_type": "administrator",
@@ -52,9 +52,9 @@ class RegistrationProfileTests(unittest.TestCase):
         ), patch("registration.fetch_one", return_value={"category": "vp"}), patch(
             "backend.eligibility.fetch_all", return_value=[]
         ):
-            self.assertTrue(_registration_policy_allows(None, user, target))
+            self.assertFalse(_registration_policy_allows(None, user, target))
 
-    def test_registered_office_staff_can_evaluate_a_selected_office_target(self):
+    def test_office_staff_cannot_evaluate_unassigned_base_office(self):
         user = {"id": 8, "campus_id": 1, "evaluator_group": "office_staff", "office_unit_code": "BAC"}
         target = {
             "target_type": "office",
@@ -63,10 +63,10 @@ class RegistrationProfileTests(unittest.TestCase):
             "office_unit_code": "BAC",
             "campus_id": 1,
         }
-        with patch("backend.eligibility.fetch_one", side_effect=[{"id": 5}, None]), patch(
+        with patch("backend.eligibility.fetch_one", side_effect=[{"id": 5, "unit_code": "BAC"}, None]), patch(
             "backend.eligibility.fetch_all", return_value=[]
-        ):
-            self.assertTrue(_registration_policy_allows(None, user, target))
+        ), patch("registration.fetch_one", return_value=None):
+            self.assertFalse(_registration_policy_allows(None, user, target))
 
     def test_membership_based_staff_can_evaluate_a_selected_office(self):
         user = {"id": 8, "campus_id": 1, "evaluator_group": "office_staff", "office_unit_code": None}
@@ -75,11 +75,45 @@ class RegistrationProfileTests(unittest.TestCase):
             "target_office_id": 5,
             "target_administrator_id": None,
             "office_unit_code": "BAC",
+            "campus_id": 2,
+        }
+        with patch("backend.eligibility.fetch_one", side_effect=[None, None]), patch(
+            "backend.eligibility.fetch_all",
+            return_value=[{"office_id": 5, "unit_code": "BAC"}],
+        ) as membership_query:
+            self.assertTrue(_registration_policy_allows(None, user, target))
+        query = membership_query.call_args.args[1]
+        self.assertIn("JOIN offices o ON o.id = om.office_id", query)
+        self.assertIn("WHERE om.user_id = %s", query)
+        self.assertEqual(membership_query.call_args.args[2], (user["id"],))
+
+    def test_membership_requires_matching_office_id_and_unit_code(self):
+        user = {"id": 8, "evaluator_group": "office_staff", "office_unit_code": None}
+        target = {
+            "target_type": "office",
+            "target_office_id": 5,
+            "target_administrator_id": None,
+            "office_unit_code": "RESEARCH_OFFICE",
             "campus_id": 1,
         }
-        with patch("backend.eligibility.fetch_one", return_value=None), patch(
+        with patch("backend.eligibility.fetch_one", side_effect=[None, None]), patch(
             "backend.eligibility.fetch_all",
-            return_value=[{"office_id": 5}],
+            return_value=[{"office_id": 5, "unit_code": "BAC"}],
+        ), patch("registration.fetch_one", return_value=None):
+            self.assertFalse(_registration_policy_allows(None, user, target))
+
+    def test_membership_allows_administrator_target_for_selected_office(self):
+        user = {"id": 8, "evaluator_group": "office_staff", "office_unit_code": None}
+        target = {
+            "target_type": "administrator",
+            "target_office_id": 5,
+            "target_administrator_id": 90,
+            "office_unit_code": "BAC",
+            "campus_id": 2,
+        }
+        with patch("backend.eligibility.fetch_one", side_effect=[None, None]), patch(
+            "backend.eligibility.fetch_all",
+            return_value=[{"office_id": 5, "unit_code": "BAC"}],
         ):
             self.assertTrue(_registration_policy_allows(None, user, target))
 

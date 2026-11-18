@@ -26,7 +26,8 @@ from eligibility import (
     rule_matches,
 )
 
-load_dotenv(Path(__file__).with_name(".env"))
+env_file = ".env.production" if os.getenv("APP_ENV") == "production" else ".env"
+load_dotenv(Path(__file__).with_name(env_file))
 
 QUESTION_TYPES = {"scale", "rating", "single_choice", "multi_choice", "yes_no", "text"}
 EVALUATOR_GROUPS = {"faculty", "student_leader", "campus_staff", "office_staff"}
@@ -58,7 +59,10 @@ def _is_int(value: Any) -> bool:
     return isinstance(value, int) and not isinstance(value, bool)
 
 
-def validate_questions(questions: list[dict[str, Any]], answers: Any) -> tuple[list[tuple[int, int]], list[tuple[int, str]]]:
+def validate_questions(
+    questions: list[dict[str, Any]],
+    answers: Any,
+) -> tuple[list[tuple[int, int]], list[tuple[int, str]], list[tuple[int, Any]]]:
     if not isinstance(answers, dict):
         raise ApiError("Answers must be an object keyed by question ID.")
 
@@ -68,6 +72,7 @@ def validate_questions(questions: list[dict[str, Any]], answers: Any) -> tuple[l
 
     tallies: list[tuple[int, int]] = []
     comments: list[tuple[int, str]] = []
+    individual_answers: list[tuple[int, Any]] = []
 
     for question in questions:
         question_id = int(question["id"])
@@ -84,6 +89,7 @@ def validate_questions(questions: list[dict[str, Any]], answers: Any) -> tuple[l
                 raise ApiError("Comments must be text of at most 5,000 characters.")
             if raw_value.strip():
                 comments.append((question_id, raw_value.strip()))
+                individual_answers.append((question_id, raw_value.strip()))
             elif question["required"]:
                 raise ApiError("A required comment is missing.")
             continue
@@ -101,14 +107,18 @@ def validate_questions(questions: list[dict[str, Any]], answers: Any) -> tuple[l
             if not minimum <= raw_value <= maximum:
                 raise ApiError("A scale answer is outside the allowed range.")
             tallies.append((question_id, raw_value))
+            individual_answers.append((question_id, raw_value))
         elif question_type == "yes_no":
             if not isinstance(raw_value, bool) and (not _is_int(raw_value) or raw_value not in (0, 1)):
                 raise ApiError("Yes-or-no answers must be true or false.")
-            tallies.append((question_id, int(raw_value)))
+            normalized_value = int(raw_value)
+            tallies.append((question_id, normalized_value))
+            individual_answers.append((question_id, normalized_value))
         elif question_type == "single_choice":
             if not _is_int(raw_value) or raw_value not in options:
                 raise ApiError("Choose a valid option.")
             tallies.append((question_id, raw_value))
+            individual_answers.append((question_id, raw_value))
         elif question_type == "multi_choice":
             if (
                 not isinstance(raw_value, list)
@@ -120,10 +130,12 @@ def validate_questions(questions: list[dict[str, Any]], answers: Any) -> tuple[l
             if question["required"] and not raw_value:
                 raise ApiError("A required answer is missing.")
             tallies.extend((question_id, value) for value in raw_value)
+            if raw_value:
+                individual_answers.append((question_id, raw_value))
         else:
             raise ApiError("This survey contains an unsupported question type.", 500)
 
-    return tallies, comments
+    return tallies, comments, individual_answers
 
 
 def validate_survey_payload(payload: Any) -> list[dict[str, Any]]:

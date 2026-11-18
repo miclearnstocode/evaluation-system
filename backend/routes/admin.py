@@ -1,8 +1,21 @@
+import json
+import re
+
 from flask import Blueprint
 
 from core import *
 
 bp = Blueprint("admin_api", __name__)
+
+
+def _redact_email_addresses(text: str) -> str:
+    return re.sub(
+        r"\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b",
+        "[email redacted]",
+        text,
+        flags=re.IGNORECASE,
+    )
+
 
 @bp.get("/api/admin/campuses")
 @require_role("super_admin")
@@ -664,13 +677,58 @@ def results():
             (cycle_id, target_id),
         )
         total = sum(row["total"] for row in counts)
-        threshold = max(cycle["min_responses"], current_app.config["MIN_RESULT_COUNT"])
+        threshold = 1
         if total < threshold:
             _audit(cursor, actor, "view_suppressed", "results", f"{cycle_id}:{target_id}")
             conn.commit()
             cursor.close()
             return jsonify(released=False, minimum=threshold, response_count=total)
         survey = _load_survey(cursor, cycle["survey_id"])
+        answer_rows = fetch_all(
+            cursor,
+            "SELECT response_id, question_id, answer_value "
+            "FROM evaluator_answers WHERE cycle_id = %s AND target_id = %s ORDER BY RAND()",
+            (cycle_id, target_id),
+        )
+        questions_by_id = {
+            question["id"]: question
+            for section in survey["sections"]
+            for question in section["questions"]
+        }
+        response_answers: dict[str, dict[int, dict[str, Any]]] = {}
+        for row in answer_rows:
+            question = questions_by_id.get(row["question_id"])
+            if not question:
+                continue
+            answer_value = row["answer_value"]
+            if isinstance(answer_value, str):
+                answer_value = json.loads(answer_value)
+            if question["type"] == "single_choice":
+                answer_value = next(
+                    (option["label"] for option in question["options"] if option["id"] == answer_value),
+                    str(answer_value),
+                )
+            elif question["type"] == "multi_choice":
+                option_labels = {option["id"]: option["label"] for option in question["options"]}
+                answer_value = [option_labels.get(value, str(value)) for value in answer_value]
+            elif question["type"] == "yes_no":
+                answer_value = "Yes" if answer_value else "No"
+            elif question["type"] == "text":
+                answer_value = _redact_email_addresses(answer_value)
+            response_answers.setdefault(row["response_id"], {})[row["question_id"]] = {
+                "question": question["question_text"],
+                "answer": answer_value,
+            }
+        individual_responses = [
+            {
+                "answers": [
+                    response[question["id"]]
+                    for question in questions_by_id.values()
+                    if question["id"] in response
+                ]
+            }
+            for response in response_answers.values()
+        ]
         question_results = []
         for section in survey["sections"]:
             for question in section["questions"]:
@@ -719,6 +777,7 @@ def results():
         cycle={"id": cycle_id, "name": cycle["name"]},
         target={"id": target_id, "name": target["target_name"]},
         questions=question_results,
+        individual_responses=individual_responses,
     )
 
 
@@ -734,30 +793,32 @@ def list_comments():
     with connection() as conn:
         cursor = conn.cursor(dictionary=True)
         cycle = fetch_one(cursor, "SELECT * FROM eval_cycles WHERE id = %s", (cycle_id,))
-        if not cycle or not _cycle_is_closed(cycle):
-            raise ApiError("Comments are available only after the cycle is closed.", 409)
+        if not cycle or not (_cycle_is_open(cycle) or _cycle_is_closed(cycle)):
+            raise ApiError("Comments are available only while a cycle is open or after it closes.", 409)
         if not _load_cycle_target(cursor, cycle_id, target_id):
             raise ApiError("Target not found in this cycle.", 404)
-        threshold = max(cycle["min_responses"], current_app.config["MIN_RESULT_COUNT"])
         rows = fetch_all(
             cursor,
-            "SELECT cm.id, cm.question_id, cm.body, cm.status, q.question_text, "
-            "(SELECT COUNT(*) FROM comments all_cm WHERE all_cm.cycle_id = cm.cycle_id "
-            "AND all_cm.target_id = cm.target_id AND all_cm.question_id = cm.question_id) AS question_count "
+            "SELECT cm.id, cm.question_id, cm.body, cm.status, q.question_text "
             "FROM comments cm JOIN questions q ON q.id = cm.question_id "
             "WHERE cm.cycle_id = %s AND cm.target_id = %s AND cm.status = %s "
             "ORDER BY RAND()",
             (cycle_id, target_id, status),
         )
         visible = [
-            {"id": row["id"], "question_id": row["question_id"], "question": row["question_text"], "body": row["body"], "status": row["status"]}
+            {
+                "id": row["id"],
+                "question_id": row["question_id"],
+                "question": row["question_text"],
+                "body": _redact_email_addresses(row["body"]),
+                "status": row["status"],
+            }
             for row in rows
-            if row["question_count"] >= threshold
         ]
         _audit(cursor, actor, "view", "comments", f"{cycle_id}:{target_id}:{status}")
         conn.commit()
         cursor.close()
-    return jsonify(items=visible, minimum=threshold)
+    return jsonify(items=visible)
 
 
 @bp.post("/api/admin/comments/<comment_id>/moderate")
@@ -777,21 +838,19 @@ def moderate_comment(comment_id: str):
         comment = fetch_one(
             cursor,
             "SELECT cm.id, cm.cycle_id, cm.target_id, cm.question_id, c.status AS cycle_status, "
-            "c.closes_at, (SELECT COUNT(*) FROM comments all_cm WHERE all_cm.cycle_id = cm.cycle_id "
-            "AND all_cm.target_id = cm.target_id AND all_cm.question_id = cm.question_id) AS question_count "
+            "c.opens_at, c.closes_at "
             "FROM comments cm JOIN eval_cycles c ON c.id = cm.cycle_id WHERE cm.id = %s",
             (normalized_id,),
         )
         if not comment:
             raise ApiError("Comment not found.", 404)
-        if not _cycle_is_closed({"status": comment["cycle_status"], "closes_at": comment["closes_at"]}):
-            raise ApiError("Comments can be moderated only after the cycle is closed.", 409)
-        threshold = max(
-            current_app.config["MIN_RESULT_COUNT"],
-            fetch_one(cursor, "SELECT min_responses FROM eval_cycles WHERE id = %s", (comment["cycle_id"],))["min_responses"],
-        )
-        if comment["question_count"] < threshold:
-            raise ApiError("This comment group is below the privacy threshold.", 409)
+        cycle = {
+            "status": comment["cycle_status"],
+            "opens_at": comment["opens_at"],
+            "closes_at": comment["closes_at"],
+        }
+        if not (_cycle_is_open(cycle) or _cycle_is_closed(cycle)):
+            raise ApiError("Comments can be moderated only while a cycle is open or after it closes.", 409)
         cursor.execute("UPDATE comments SET status = %s WHERE id = %s", (status, normalized_id))
         _audit(cursor, actor, status, "comment", normalized_id)
         conn.commit()

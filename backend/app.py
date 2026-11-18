@@ -1,5 +1,7 @@
 """Flask application factory and process entry point."""
 
+from __future__ import annotations
+
 import sys
 from pathlib import Path
 
@@ -19,7 +21,8 @@ def create_app(test_config: dict[str, Any] | None = None) -> Flask:
         FRONTEND_ORIGINS=[
             item.strip()
             for item in os.getenv(
-                "FRONTEND_ORIGINS", "http://localhost:3000,http://127.0.0.1:3000"
+                "FRONTEND_ORIGINS",
+                "http://localhost:3000,http://127.0.0.1:3000,https://gsu.capsu.edu.ph",
             ).split(",")
             if item.strip()
         ],

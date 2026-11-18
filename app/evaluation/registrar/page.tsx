@@ -1,24 +1,23 @@
+"use client";
+
 import { Suspense } from "react";
+import { useSearchParams } from "next/navigation";
 import EvaluationForm from "./client-form";
 
-type RegistrarPageProps = {
-  searchParams: Promise<{
-    cycleId?: string;
-    targetId?: string;
-  }>;
-};
-
-async function EvaluationPageContent({
-  searchParams,
-}: RegistrarPageProps) {
-  const { cycleId, targetId } = await searchParams;
-  return <EvaluationForm cycleId={cycleId ?? ""} targetId={targetId ?? ""} />;
+function EvaluationPageContent() {
+  const searchParams = useSearchParams();
+  return (
+    <EvaluationForm
+      cycleId={searchParams.get("cycleId") ?? ""}
+      targetId={searchParams.get("targetId") ?? ""}
+    />
+  );
 }
 
-export default function RegistrarEvaluationPage(props: RegistrarPageProps) {
+export default function RegistrarEvaluationPage() {
   return (
     <Suspense fallback={<p className="p-8 text-center text-gray-500">Loading evaluation…</p>}>
-      <EvaluationPageContent searchParams={props.searchParams} />
+      <EvaluationPageContent />
     </Suspense>
   );
 }
