@@ -12,8 +12,9 @@ ls venv/bin/gunicorn
 to start the backend
 mkdir -p ~/logs
 cd ~/repositories/evaluation-system/backend
+export APP_ENV=production
 
-nohup venv/bin/python3 venv/bin/gunicorn app:app \
+nohup venv/bin/python3 venv/bin/gunicorn 'app:create_app()' \
   --bind 127.0.0.1:5200 \
   --workers 3 \
   --timeout 120 \

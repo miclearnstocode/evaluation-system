@@ -122,8 +122,6 @@ def _registration_policy_allows(cursor: Any, user: dict[str, Any], target: dict[
     if target_category == "director":
         if group == "faculty" and target_unit == "RESEARCH_OFFICE":
             return True
-        if group == "office_staff" and target_office in own_offices:
-            return True
     return False
 
 

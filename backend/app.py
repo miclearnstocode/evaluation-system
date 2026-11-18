@@ -35,7 +35,10 @@ def create_app(test_config: dict[str, Any] | None = None) -> Flask:
     if test_config:
         app.config.update(test_config)
     if not app.config["SECRET_KEY"]:
-        raise RuntimeError("Set SECRET_KEY in backend/.env before starting the API.")
+        raise RuntimeError(
+            "Set SECRET_KEY in backend/.env, or backend/.env.production with APP_ENV=production, "
+            "before starting the API."
+        )
     if app.config["MIN_RESULT_COUNT"] < 2:
         raise RuntimeError("MIN_RESULT_COUNT must be at least 2.")
     app.config.update(
