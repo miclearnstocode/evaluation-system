@@ -1,7 +1,7 @@
 import json
 import re
 from decimal import Decimal, ROUND_HALF_UP
-
+from __future__ import annotations
 from flask import Blueprint
 
 if __package__ and "." in __package__:
