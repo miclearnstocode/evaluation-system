@@ -8,6 +8,7 @@ import { apiFetch } from "../lib/api";
 const links = [
   ["Live Office Standing", "/super_admin/standing"],
   ["Results", "/super_admin/results"],
+  ["Submissions", "/super_admin/submissions"],
 ];
 
 type SuperAdminSession = { id: number; email: string; role: "admin" | "super_admin" | "evaluator" };

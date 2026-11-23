@@ -33,6 +33,15 @@ class RegistrationCursor:
 
     def fetchall(self):
         selected_codes = self.executed[-1][1][1:]
+        if "FROM `vice_presidents`" in self.query and "VP_ACADEMIC" in selected_codes:
+            return [{
+                "source_id": 1,
+                "code": "VP_ACADEMIC",
+                "campus_id": None,
+                "campus_is_central": None,
+                "target_id": None,
+                "target_active": None,
+            }]
         if "FROM `campus_administrators`" in self.query and "2" in selected_codes:
             return [{
                 "source_id": 2,
@@ -219,9 +228,13 @@ class RegistrationFlowTests(unittest.TestCase):
     def test_registration_options_return_all_41_offices_without_role_filtering(self):
         app = create_app({"SECRET_KEY": "test-secret", "TESTING": True})
         connection = RegistrationConnection()
-        offices = [
-            {"code": f"OFFICE_{index}", "name": f"Office {index}"}
-            for index in range(41)
+        sections = [
+            ("vice_presidents", "Vice President offices", 4),
+            ("campus_administrators", "Campus Administrator", 3),
+            ("satellite_college_directors", "Satellite College Directors", 6),
+            ("rde_directors", "RDE Directors", 2),
+            ("rde_center_directors", "RDE Center", 7),
+            ("directors", "Director", 19),
         ]
 
         @contextmanager
@@ -229,7 +242,17 @@ class RegistrationFlowTests(unittest.TestCase):
             yield connection
 
         def fake_fetch_all(cursor, query, params=()):
-            return offices if "FROM `directors`" in query else []
+            for table, label, count in sections:
+                if f"FROM `{table}`" in query:
+                    rows = [
+                        {"code": f"{table}_{index}", "name": f"{label} {index}"}
+                        for index in range(count)
+                    ]
+                    if table == "campus_administrators":
+                        self.assertIn("c.location_code AS campus_code", query)
+                        rows[2]["campus_code"] = "BURIAS"
+                    return rows
+            return []
 
         with patch("backend.routes.auth.connection", fake_connection), patch(
             "backend.routes.auth.fetch_all", side_effect=fake_fetch_all
@@ -239,8 +262,60 @@ class RegistrationFlowTests(unittest.TestCase):
             )
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(len(response.get_json()["memberships"]), 41)
-        self.assertNotIn("role_memberships", response.get_json())
+        data = response.get_json()
+        self.assertEqual(len(data["memberships"]), 41)
+        burias = next(office for office in data["memberships"] if office["campus_code"] == "BURIAS")
+        self.assertEqual(burias["unit_code"], "campus_administrators_2")
+        self.assertTrue(burias["student_leader_available"])
+        self.assertIn({"value": "vice_president", "label": "Vice President"}, data["position_roles"])
+        self.assertEqual(
+            [
+                (section["label"], [office["unit_code"] for office in section["offices"]])
+                for section in data["office_sections"]
+            ],
+            [
+                (label, [f"{table}_{index}" for index in range(count)])
+                for table, label, count in sections
+            ],
+        )
+        self.assertNotIn("role_memberships", data)
+
+    def test_registration_saves_vice_president_office_for_non_teaching_staff(self):
+        app = create_app({"SECRET_KEY": "test-secret", "TESTING": True})
+        connection = RegistrationConnection()
+
+        @contextmanager
+        def fake_connection(*args):
+            yield connection
+
+        with patch("backend.routes.auth.connection", fake_connection):
+            response = app.test_client().post(
+                "/api/auth/register",
+                json={
+                    "email": "vp@capsu.edu.ph",
+                    "password": "secure-password-123",
+                    "first_name": "Ada",
+                    "last_name": "Lovelace",
+                    "position_role": "non_teaching_staff",
+                    "office_unit_codes": ["VP_ACADEMIC"],
+                    "location_code": "MAIN",
+                    "years_of_service": "1_5",
+                },
+            )
+
+        self.assertEqual(response.status_code, 201)
+        self.assertTrue(connection.committed)
+        user_query, user_params = next(
+            entry for entry in connection.db_cursor.executed if "INSERT INTO users" in entry[0]
+        )
+        self.assertIn("'evaluator'", user_query)
+        self.assertEqual(user_params[5], "non_teaching_staff")
+        target_query, target_params = next(
+            entry for entry in connection.db_cursor.executed if "INSERT INTO targets" in entry[0]
+        )
+        self.assertIn("vice_president_id", target_query)
+        self.assertEqual(target_params, ("vice_president", 1, None, True))
+        self.assertEqual(connection.db_cursor.batch_executed[0][1], [(42, 101)])
 
     def test_authenticated_user_lookup_reads_role_for_assignment_eligibility(self):
         app = create_app({"SECRET_KEY": "test-secret", "TESTING": True})
@@ -508,7 +583,7 @@ class RegistrationFlowTests(unittest.TestCase):
             response = app.test_client().post(
                 "/api/auth/register",
                 json={
-                    "email": "leader@capsu.edu.ph",
+                    "email": " Leader@Student.CAPSU.edu.ph ",
                     "password": "secure-password-123",
                     "first_name": "Ada",
                     "last_name": "Lovelace",
@@ -524,7 +599,22 @@ class RegistrationFlowTests(unittest.TestCase):
             for query, params in connection.db_cursor.executed
             if "INSERT INTO users" in query
         )
+        self.assertEqual(insert_params[0], "leader@student.capsu.edu.ph")
         self.assertIsNone(insert_params[6])
+
+    def test_registration_silently_rejects_unsupported_email_domains(self):
+        app = create_app({"SECRET_KEY": "test-secret", "TESTING": True})
+        with patch("backend.routes.auth.connection") as connection:
+            for email in (
+                "evaluator@gmail.com",
+                "evaluator@capsu.edu.ph.example.com",
+                "evaluator@other.capsu.edu.ph",
+            ):
+                with self.subTest(email=email):
+                    response = app.test_client().post("/api/auth/register", json={"email": email})
+                    self.assertEqual(response.status_code, 204)
+                    self.assertEqual(response.data, b"")
+            connection.assert_not_called()
 
     def test_other_roles_still_require_years_of_service(self):
         app = create_app({"SECRET_KEY": "test-secret", "TESTING": True})
@@ -543,6 +633,75 @@ class RegistrationFlowTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 400)
         self.assertIn("valid years of service", response.get_json()["error"])
+
+    def test_registration_limits_offices_by_role_and_campus(self):
+        app = create_app({"SECRET_KEY": "test-secret", "TESTING": True})
+        cases = [
+            ("satellite_college_director", "SATELLITE_DIRECTOR_TAPAZ", 27, 201),
+            ("satellite_college_director", "SATELLITE_DIRECTOR_PILAR", 20, 400),
+            ("campus_administrator", "CAMPUS_FOCAL_ROXAS", 19, 400),
+            ("director", "STUDENT_AFFAIRS", None, 201),
+            ("director", "SPORTS", None, 201),
+            ("director", "CULTURAL", None, 201),
+            ("director", "BAC", None, 400),
+            ("vice_president", "VP_ACADEMIC", None, 201),
+            ("rde_director", "RESEARCH_OFFICE", None, 400),
+        ]
+        role_cases = [("student_leader", *case) for case in cases] + [
+            ("teaching_faculty", "campus_administrator", "CAMPUS_ADMIN_BURIAS", 21, 400),
+            ("teaching_faculty", "satellite_college_director", "SATELLITE_DIRECTOR_TAPAZ", 27, 201),
+            ("teaching_faculty", "satellite_college_director", "SATELLITE_DIRECTOR_PILAR", 20, 400),
+            ("teaching_faculty", "director", "BAC", None, 201),
+            ("teaching_faculty", "rde_director", "RESEARCH_OFFICE", None, 201),
+            ("director", "director", "BAC", None, 201),
+            ("director", "director", "SPORTS", None, 400),
+            ("vice_president", "vice_president", "VP_ACADEMIC", None, 400),
+            ("vice_president", "satellite_college_director", "SATELLITE_DIRECTOR_TAPAZ", 27, 400),
+            ("vice_president", "director", "BAC", None, 201),
+            ("vice_president", "rde_director", "RESEARCH_OFFICE", None, 201),
+            ("vice_president", "rde_center_director", "FOOD_TECH_CENTER", None, 201),
+            ("campus_administrator_satellite_director", "director", "DIR_BAC", None, 201),
+            ("campus_administrator_satellite_director", "satellite_college_director", "SATELLITE_DIRECTOR_TAPAZ", 27, 400),
+        ]
+        campus_cases = [("TAPAZ", 27, *case) for case in role_cases] + [
+            ("BURIAS", 21, "vice_president", "campus_administrator", "CAMPUS_ADMIN_BURIAS", 21, 400),
+            ("BURIAS", 21, "non_teaching_staff", "campus_administrator", "CAMPUS_ADMIN_BURIAS", 21, 201),
+            ("BURIAS", 21, "non_teaching_staff", "satellite_college_director", "SATELLITE_DIRECTOR_TAPAZ", 27, 400),
+        ]
+        for location, campus_id, role, target_type, code, office_campus, status in campus_cases:
+            with self.subTest(location=location, role=role, code=code):
+                connection = RegistrationConnection()
+
+                @contextmanager
+                def fake_connection(*args):
+                    yield connection
+
+                def fake_fetch_all(cursor, query, params=()):
+                    if params[0] != target_type:
+                        return []
+                    return [{
+                        "code": code,
+                        "campus_id": office_campus,
+                        "target_id": 10,
+                        "target_active": True,
+                    }]
+
+                with patch("backend.routes.auth.connection", fake_connection), patch(
+                    "backend.routes.auth.fetch_one", return_value={"id": campus_id, "is_central": 0}
+                ), patch("backend.routes.auth.fetch_all", side_effect=fake_fetch_all):
+                    response = app.test_client().post("/api/auth/register", json={
+                        "email": "leader@capsu.edu.ph",
+                        "password": "secure-password-123",
+                        "first_name": "Ada",
+                        "last_name": "Lovelace",
+                        "position_role": role,
+                        "years_of_service": "1_5",
+                        "office_unit_codes": [code],
+                        "location_code": location,
+                    })
+
+                self.assertEqual(response.status_code, status)
+                self.assertEqual(connection.committed, status == 201)
 
     def test_cycle_automatically_includes_all_active_targets(self):
         cursor = TargetCursor()

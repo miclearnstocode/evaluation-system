@@ -75,7 +75,7 @@ the DDL enforces the type/reference match and each reference has a foreign key.
 | `rde_center_directors` | Director targets for individual RDE centers. |
 | `targets` | Common evaluation target registry. A target points to exactly one of the six target-specific tables, with optional campus, central, and active flags, and an optional `office_head_name` holding the name of the designated office head being evaluated (for example, `Dr. Leo Andrew B. Biclar`; officers-in-charge are stored with an `(OIC)` suffix). The name is plain text, not a link to a user account, and one person can head more than one office. Cycles, assignments, participation, and aggregate results reference it. |
 | `users` | Super-admin, admin, and evaluator accounts, authentication, campus, registration role, service range, and active status. Admin accounts manage the system and can view aggregate office means. Super admins are results-only and can access evaluator-level means and detailed results, but cannot manage system configuration or submissions. |
-| `user_office_assignments` | Many-to-many links between users and targets, with `head` or `member` assignment role. Assignments are retained for account records but do not restrict evaluator access. |
+| `user_office_assignments` | Many-to-many links between users and targets, with `head` or `member` assignment role. Registration stores selected office/unit memberships as `member` rows; evaluator target listings and submission endpoints use those rows to restrict evaluable offices/units. |
 
 ### Surveys and evaluation setup
 

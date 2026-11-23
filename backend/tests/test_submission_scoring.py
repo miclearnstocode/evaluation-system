@@ -100,7 +100,9 @@ class EvaluationScoringPersistenceTests(unittest.TestCase):
 
         with patch("backend.core._current_user", return_value={"id": 7, "role": "evaluator"}), patch(
             "backend.routes.evaluator.connection", fake_connection
-        ), patch("backend.routes.evaluator.fetch_one", side_effect=[cycle, None]), patch(
+        ), patch(
+            "backend.routes.evaluator.fetch_one", side_effect=[cycle, {"membership": 1}, None]
+        ), patch(
             "backend.routes.evaluator._cycle_is_open", return_value=True
         ), patch(
             "backend.routes.evaluator._load_evaluator_target", return_value={"id": 9}
@@ -177,6 +179,7 @@ class EvaluationTargetAccessTests(unittest.TestCase):
             "target_type": "director",
             "campus_id": 5,
             "is_central": 0,
+            "office_head_name": None,
             "target_name": "Office Alpha",
             "campus_name": "Remote Campus",
         }
@@ -191,7 +194,7 @@ class EvaluationTargetAccessTests(unittest.TestCase):
             session["user_id"] = self.user["id"]
         return client
 
-    def test_target_list_includes_targets_outside_cycle_and_profile_eligibility(self):
+    def test_target_list_is_limited_to_selected_memberships(self):
         cycle = {
             "cycle_id": 3,
             "cycle_name": "Current cycle",
@@ -211,28 +214,36 @@ class EvaluationTargetAccessTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(len(response.get_json()["items"]), 1)
         self.assertEqual(response.get_json()["items"][0]["target_name"], "Office Alpha")
-        self.assertIn("FROM targets t", fetch_all.call_args_list[1].args[1])
-        self.assertIn("LEFT JOIN target_catalog", fetch_all.call_args_list[1].args[1])
+        target_query = fetch_all.call_args_list[1].args[1]
+        self.assertIn("FROM user_office_assignments ua", target_query)
+        self.assertIn("JOIN target_catalog tc", target_query)
+        self.assertIn("assignment_role = 'member'", target_query)
+        self.assertNotIn("FROM targets", target_query)
+        self.assertEqual(fetch_all.call_args_list[1].args[2], (self.user["id"],))
         self.assertNotIn("cycle_targets", fetch_all.call_args_list[1].args[1])
 
-    def test_target_list_includes_all_targets_when_no_cycle_is_open(self):
+    def test_target_list_returns_selected_memberships_when_no_cycle_is_open(self):
         with patch("backend.core._current_user", return_value=self.user), patch(
             "backend.routes.evaluator.connection", self.fake_connection
-        ), patch("backend.routes.evaluator.fetch_all", side_effect=[[], [self.target]]), patch(
+        ), patch("backend.routes.evaluator.fetch_all", side_effect=[[], [self.target]]) as fetch_all, patch(
             "backend.routes.evaluator.fetch_one"
         ) as fetch_one:
             response = self.authenticated_client().get("/api/evaluator/targets")
 
         self.assertEqual(response.status_code, 200)
+        target_query = fetch_all.call_args_list[1].args[1]
+        self.assertIn("FROM user_office_assignments ua", target_query)
+        self.assertNotIn("FROM targets", target_query)
+        self.assertEqual(fetch_all.call_args_list[1].args[2], (self.user["id"],))
         self.assertEqual(
             response.get_json()["items"],
             [
                 {
                     "cycle_id": None,
-                    "cycle_name": None,
                     "target_id": 9,
                     "target_type": "director",
                     "target_name": "Office Alpha",
+                    "office_head_name": None,
                     "campus_name": "Remote Campus",
                     "is_central": 0,
                     "submitted": False,
@@ -241,7 +252,7 @@ class EvaluationTargetAccessTests(unittest.TestCase):
         )
         fetch_one.assert_not_called()
 
-    def test_form_is_available_for_any_target_in_the_cycle(self):
+    def test_form_is_available_for_a_selected_membership(self):
         cycle = {
             "id": 3,
             "survey_id": 4,
@@ -258,13 +269,13 @@ class EvaluationTargetAccessTests(unittest.TestCase):
         }
         with patch("backend.core._current_user", return_value=self.user), patch(
             "backend.routes.evaluator.connection", self.fake_connection
-        ), patch("backend.routes.evaluator.fetch_one", side_effect=[cycle, None]), patch(
+        ), patch(
+            "backend.routes.evaluator.fetch_one", side_effect=[cycle, {"membership": 1}, None]
+        ) as fetch_one, patch(
             "backend.routes.evaluator._cycle_is_open", return_value=True
         ), patch(
             "backend.routes.evaluator._load_evaluator_target",
             return_value={"id": 9, "target_name": "Office Alpha"},
-        ), patch(
-            "backend.routes.evaluator._cycle_user_eligible", return_value=False
         ), patch(
             "backend.routes.evaluator._load_survey", return_value=survey
         ) as load_survey:
@@ -274,10 +285,43 @@ class EvaluationTargetAccessTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.get_json()["target_name"], "Office Alpha")
+        membership_query = next(
+            call.args[1]
+            for call in fetch_one.call_args_list
+            if "FROM user_office_assignments" in call.args[1]
+        )
+        self.assertIn("assignment_role = 'member'", membership_query)
         load_survey.assert_called_once_with(
             self.connection.db_cursor,
             4,
         )
+
+    def test_form_rejects_a_target_outside_selected_memberships(self):
+        cycle = {
+            "id": 3,
+            "survey_id": 4,
+            "name": "Current cycle",
+            "opens_at": datetime(2026, 1, 1),
+            "closes_at": datetime(2027, 1, 1),
+            "status": "open",
+        }
+        with patch("backend.core._current_user", return_value=self.user), patch(
+            "backend.routes.evaluator.connection", self.fake_connection
+        ), patch(
+            "backend.routes.evaluator.fetch_one",
+            side_effect=[cycle, None],
+        ), patch(
+            "backend.routes.evaluator._cycle_is_open", return_value=True
+        ), patch(
+            "backend.routes.evaluator._load_evaluator_target",
+            return_value={"id": 9, "target_name": "Office Alpha"},
+        ):
+            response = self.authenticated_client().get(
+                "/api/evaluator/targets/9/form?cycle_id=3"
+            )
+
+        self.assertEqual(response.status_code, 403)
+        self.assertIn("selected in your membership", response.get_json()["error"])
 
     def test_submit_rejects_a_second_evaluation_for_the_same_target_and_cycle(self):
         cycle = {
@@ -289,7 +333,10 @@ class EvaluationTargetAccessTests(unittest.TestCase):
         }
         with patch("backend.core._current_user", return_value=self.user), patch(
             "backend.routes.evaluator.connection", self.fake_connection
-        ), patch("backend.routes.evaluator.fetch_one", side_effect=[cycle, {"id": 12}]), patch(
+        ), patch(
+            "backend.routes.evaluator.fetch_one",
+            side_effect=[cycle, {"membership": 1}, {"id": 12}],
+        ), patch(
             "backend.routes.evaluator._cycle_is_open", return_value=True
         ), patch(
             "backend.routes.evaluator._load_evaluator_target",
@@ -306,6 +353,36 @@ class EvaluationTargetAccessTests(unittest.TestCase):
         self.assertEqual(response.status_code, 409)
         self.assertIn("already submitted", response.get_json()["error"])
         self.assertFalse(self.connection.committed)
+
+    def test_submit_rejects_a_target_outside_selected_memberships(self):
+        cycle = {
+            "id": 3,
+            "survey_id": 4,
+            "status": "open",
+            "opens_at": datetime(2026, 1, 1),
+            "closes_at": datetime(2027, 1, 1),
+        }
+        with patch("backend.core._current_user", return_value=self.user), patch(
+            "backend.routes.evaluator.connection", self.fake_connection
+        ), patch(
+            "backend.routes.evaluator.fetch_one",
+            side_effect=[cycle, None],
+        ), patch(
+            "backend.routes.evaluator._cycle_is_open", return_value=True
+        ), patch(
+            "backend.routes.evaluator._load_evaluator_target",
+            return_value={"id": 9, "target_name": "Office Alpha"},
+        ):
+            response = self.authenticated_client().post(
+                "/api/evaluator/submit",
+                json={"cycle_id": 3, "target_id": 9, "answers": {}},
+            )
+
+        self.assertEqual(response.status_code, 403)
+        self.assertFalse(self.connection.committed)
+        self.assertFalse(
+            any("INSERT INTO participation" in query for query, _ in self.connection.db_cursor.executed)
+        )
 
 
 class EvaluationSubmissionReviewTests(unittest.TestCase):

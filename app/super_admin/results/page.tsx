@@ -11,7 +11,7 @@ type ResultQuestion = {
   id: number;
   text: string;
   type: string;
-  mean: number | null;
+  mean: number | string | null;
   distribution: Distribution[];
 };
 type IndividualAnswer = {
@@ -187,13 +187,14 @@ export default function SuperAdminResultsPage() {
           </div>
           {results.questions?.map((question) => {
             const max = Math.max(1, ...question.distribution.map((item) => item.count));
+            const mean = question.mean == null ? null : Number(question.mean);
             return (
               <article key={question.id} className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
                 <div className="flex flex-wrap items-start justify-between gap-4">
                   <h3 className="font-semibold text-[#1F3A5F]">{question.text}</h3>
-                  {question.mean !== null && (
+                  {mean !== null && Number.isFinite(mean) && (
                     <p className="shrink-0 text-right">
-                      <span className="block text-2xl font-bold text-teal-800">{question.mean.toFixed(2)}</span>
+                      <span className="block text-2xl font-bold text-teal-800">{mean.toFixed(2)}</span>
                       <span className="text-xs text-slate-500">Average</span>
                     </p>
                   )}

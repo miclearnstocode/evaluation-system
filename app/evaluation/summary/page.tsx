@@ -1,6 +1,7 @@
 "use client";
 
-import { Suspense, useEffect, useState } from "react";
+import { Suspense, useEffect, useRef, useState } from "react";
+import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import EvaluatorHeader from "../evaluator-header";
 import { apiFetch } from "../../lib/api";
@@ -44,6 +45,9 @@ function EvaluationSummaryContent() {
   const [summary, setSummary] = useState<EvaluationSummary | null>(null);
   const [requestError, setRequestError] = useState<{ key: string; message: string } | null>(null);
   const [completedRequestKey, setCompletedRequestKey] = useState("");
+  const [sectionIndex, setSectionIndex] = useState(0);
+  const [isScrolling, setIsScrolling] = useState(false);
+  const sectionHeading = useRef<HTMLHeadingElement>(null);
   const requestKey = `${cycleId}:${targetId}`;
   const invalidIdentifier = !cycleId || !targetId;
 
@@ -55,7 +59,10 @@ function EvaluationSummaryContent() {
       `/api/evaluator/submissions?cycle_id=${encodeURIComponent(cycleId)}&target_id=${encodeURIComponent(targetId)}`,
     )
       .then((data) => {
-        if (active) setSummary(data);
+        if (active) {
+          setSummary(data);
+          setSectionIndex(0);
+        }
       })
       .catch((requestError: Error) => {
         if (active) setRequestError({ key: requestKey, message: requestError.message });
@@ -69,19 +76,54 @@ function EvaluationSummaryContent() {
     };
   }, [cycleId, invalidIdentifier, requestKey, targetId]);
 
+  useEffect(() => {
+    let scrollTimer: number | undefined;
+
+    function handleScroll() {
+      setIsScrolling(true);
+      window.clearTimeout(scrollTimer);
+      scrollTimer = window.setTimeout(() => setIsScrolling(false), 200);
+    }
+
+    window.addEventListener("scroll", handleScroll, { passive: true });
+    return () => {
+      window.removeEventListener("scroll", handleScroll);
+      window.clearTimeout(scrollTimer);
+    };
+  }, []);
+
   const loading = !invalidIdentifier && completedRequestKey !== requestKey;
   const visibleSummary =
     summary?.cycle_id === Number(cycleId) && summary.target_id === Number(targetId) ? summary : null;
+  const sections = [...(visibleSummary?.sections ?? [])];
+  for (const score of visibleSummary?.scores?.section_scores ?? []) {
+    if (!sections.some((section) => section.id === score.section_id)) {
+      sections.push({ id: score.section_id, title: score.title, answers: [] });
+    }
+  }
+  const sectionCount = sections.length;
+  const currentSection = sections[sectionIndex];
+  const sectionScore = visibleSummary?.scores?.section_scores.find(
+    (score) => score.section_id === currentSection?.id,
+  );
   const error = invalidIdentifier
     ? "The evaluation could not be identified."
     : requestError?.key === requestKey
       ? requestError.message
       : "";
 
+  function goToSection(index: number) {
+    setSectionIndex(index);
+    requestAnimationFrame(() => {
+      sectionHeading.current?.focus({ preventScroll: true });
+      sectionHeading.current?.scrollIntoView({ block: "start" });
+    });
+  }
+
   return (
     <div className="min-h-screen bg-linear-to-br from-slate-50 via-white to-teal-50/40 text-slate-900">
       <EvaluatorHeader currentPage="evaluations" />
-      <main className="mx-auto max-w-4xl space-y-6 px-5 py-8 sm:py-10">
+      <main className="mx-auto max-w-4xl space-y-6 px-5 pt-8 pb-28 sm:pt-10">
         <div>
           <p className="text-sm font-semibold uppercase tracking-wide text-teal-800">My submission</p>
           <h1 className="mt-2 text-3xl font-bold tracking-tight text-[#1F3A5F]">Your submitted answers</h1>
@@ -102,42 +144,20 @@ function EvaluationSummaryContent() {
           <section className="rounded-2xl border border-teal-200 bg-white p-5 shadow-sm sm:p-6">
             <h2 className="text-lg font-semibold text-[#1F3A5F]">Scores for this evaluation</h2>
             {visibleSummary.scores ? (
-              <>
-                <dl className="mt-4 grid gap-3 sm:grid-cols-2">
-                  <div className="rounded-xl bg-teal-50 p-4">
-                    <dt className="text-sm font-medium text-teal-900">Total score</dt>
-                    <dd className="mt-1 text-2xl font-bold text-teal-950">
-                      {visibleSummary.scores.total_score.toFixed(2)}
-                    </dd>
-                  </div>
-                  <div className="rounded-xl bg-slate-50 p-4">
-                    <dt className="text-sm font-medium text-slate-600">Mean per section</dt>
-                    <dd className="mt-1 text-2xl font-bold text-slate-900">
-                      {visibleSummary.scores.mean_score.toFixed(2)}
-                    </dd>
-                  </div>
-                </dl>
-                <div className="mt-4 overflow-hidden rounded-xl border border-slate-200">
-                  <table className="w-full text-left text-sm">
-                    <thead className="bg-slate-50 text-slate-600">
-                      <tr>
-                        <th scope="col" className="px-4 py-3 font-semibold">Section</th>
-                        <th scope="col" className="px-4 py-3 text-right font-semibold">Score</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-100">
-                      {visibleSummary.scores.section_scores.map((section) => (
-                        <tr key={section.section_id}>
-                          <th scope="row" className="px-4 py-3 font-medium text-slate-800">{section.title}</th>
-                          <td className="px-4 py-3 text-right tabular-nums text-slate-700">
-                            {section.score.toFixed(2)}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
+              <dl className="mt-4 grid gap-3 sm:grid-cols-2">
+                <div className="rounded-xl bg-teal-50 p-4">
+                  <dt className="text-sm font-medium text-teal-900">Total score</dt>
+                  <dd className="mt-1 text-2xl font-bold text-teal-950">
+                    {visibleSummary.scores.total_score.toFixed(2)}
+                  </dd>
                 </div>
-              </>
+                <div className="rounded-xl bg-slate-50 p-4">
+                  <dt className="text-sm font-medium text-slate-600">Mean per section</dt>
+                  <dd className="mt-1 text-2xl font-bold text-slate-900">
+                    {visibleSummary.scores.mean_score.toFixed(2)}
+                  </dd>
+                </div>
+              </dl>
             ) : (
               <p className="mt-3 text-sm text-slate-600">
                 Score details are not available for this submission.
@@ -158,17 +178,32 @@ function EvaluationSummaryContent() {
           </p>
         )}
 
-        {!loading && visibleSummary && visibleSummary.sections.length === 0 && (
+        {!loading && visibleSummary && sectionCount === 0 && (
           <p className="rounded-xl border border-slate-200 bg-white px-5 py-6 text-sm text-slate-600">
             No saved answers were found for this evaluation.
           </p>
         )}
 
-        {!loading && visibleSummary?.sections.map((section) => (
-          <section key={section.id} className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
-            <h2 className="text-lg font-semibold text-[#1F3A5F]">{section.title}</h2>
-            <div className="mt-4 space-y-4">
-              {section.answers.map((answer) => (
+        {!loading && currentSection && (
+          <section aria-labelledby="summary-section-title" className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+            <header className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 bg-slate-50 px-5 py-4 sm:px-6">
+              <div>
+                <p className="text-xs font-semibold text-teal-800">Section {sectionIndex + 1} of {sectionCount}</p>
+                <h2 id="summary-section-title" ref={sectionHeading} tabIndex={-1} className="mt-1 scroll-mt-6 text-lg font-semibold text-[#1F3A5F]">
+                  {currentSection.title}
+                </h2>
+              </div>
+              {sectionScore && (
+                <p className="rounded-full bg-teal-50 px-3 py-1 text-sm font-semibold text-teal-900">
+                  Section score {sectionScore.score.toFixed(2)}
+                </p>
+              )}
+            </header>
+            <div className="space-y-4 p-5 sm:p-6">
+              {currentSection.answers.length === 0 && (
+                <p className="text-sm text-slate-600">No saved answers for this section.</p>
+              )}
+              {currentSection.answers.map((answer) => (
                 <article key={answer.question_id} className="border-t border-slate-100 pt-4 first:border-0 first:pt-0">
                   <h3 className="text-sm font-medium leading-6 text-slate-700">{answer.question}</h3>
                   {Array.isArray(answer.answer) ? (
@@ -187,17 +222,40 @@ function EvaluationSummaryContent() {
                 </article>
               ))}
             </div>
+            {sectionCount > 1 && (
+              <nav aria-label="Summary sections" className="flex justify-between gap-3 border-t border-slate-100 px-5 py-4 sm:px-6">
+                <button
+                  type="button"
+                  disabled={sectionIndex === 0}
+                  onClick={() => goToSection(sectionIndex - 1)}
+                  className="rounded-xl border border-slate-300 px-4 py-2.5 text-sm font-semibold text-slate-700 hover:border-teal-600 hover:text-teal-800 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  Previous section
+                </button>
+                <button
+                  type="button"
+                  disabled={sectionIndex + 1 >= sectionCount}
+                  onClick={() => goToSection(sectionIndex + 1)}
+                  className="rounded-xl bg-teal-700 px-4 py-2.5 text-sm font-semibold text-white hover:bg-teal-800 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  Next section
+                </button>
+              </nav>
+            )}
           </section>
-        ))}
-
-        <a
-          href="/evaluation/"
-          className="inline-flex items-center gap-2 text-sm font-semibold text-teal-800 hover:underline"
-        >
-          <span aria-hidden="true">←</span>
-          Back to My Evaluations
-        </a>
+        )}
       </main>
+      <Link
+        href="/evaluation/"
+        className={`fixed right-5 bottom-5 z-20 inline-flex items-center gap-2 rounded-full bg-[#1F3A5F] px-4 py-3 text-sm font-semibold text-white shadow-lg transition-[opacity,transform] duration-150 hover:bg-teal-800 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-teal-600 motion-reduce:transition-none sm:bottom-8 lg:right-[max(1.25rem,calc(50%_-_26.75rem))] ${
+          isScrolling
+            ? "pointer-events-none translate-y-2 opacity-0 focus-visible:pointer-events-auto focus-visible:translate-y-0 focus-visible:opacity-100"
+            : "translate-y-0 opacity-100"
+        }`}
+      >
+        <span aria-hidden="true">←</span>
+        Back to My Evaluations
+      </Link>
     </div>
   );
 }

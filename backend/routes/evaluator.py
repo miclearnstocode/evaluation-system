@@ -15,16 +15,21 @@ bp = Blueprint("evaluator_api", __name__)
 def _load_evaluator_target(cursor: Any, target_id: int) -> dict[str, Any] | None:
     return fetch_one(
         cursor,
-        "SELECT t.id, t.target_type, COALESCE(tc.campus_id, t.campus_id) AS campus_id, "
-        "t.is_central, t.office_head_name, "
-        "COALESCE(tc.name, t.office_head_name, "
-        "CONCAT(REPLACE(t.target_type, '_', ' '), ' #', t.id)) AS target_name, "
-        "c.name AS campus_name FROM targets t "
-        "LEFT JOIN target_catalog tc ON tc.id = t.id "
-        "LEFT JOIN campuses c ON c.id = COALESCE(tc.campus_id, t.campus_id) "
-        "WHERE t.id = %s",
+        "SELECT tc.id, tc.target_type, tc.campus_id, tc.is_central, "
+        "NULL AS office_head_name, tc.name AS target_name, c.name AS campus_name "
+        "FROM target_catalog tc LEFT JOIN campuses c ON c.id = tc.campus_id "
+        "WHERE tc.id = %s",
         (target_id,),
     )
+
+
+def _has_evaluator_membership(cursor: Any, user_id: int, target_id: int) -> bool:
+    return fetch_one(
+        cursor,
+        "SELECT 1 FROM user_office_assignments "
+        "WHERE user_id = %s AND target_id = %s AND assignment_role = 'member'",
+        (user_id, target_id),
+    ) is not None
 
 
 @bp.get("/api/evaluator/targets")
@@ -40,15 +45,14 @@ def evaluator_targets():
         )
         targets = fetch_all(
             cursor,
-            "SELECT t.id AS target_id, t.target_type, "
-            "COALESCE(tc.campus_id, t.campus_id) AS campus_id, t.is_central, "
-            "t.office_head_name, "
-            "COALESCE(tc.name, t.office_head_name, "
-            "CONCAT(REPLACE(t.target_type, '_', ' '), ' #', t.id)) AS target_name, "
-            "c.name AS campus_name FROM targets t "
-            "LEFT JOIN target_catalog tc ON tc.id = t.id "
-            "LEFT JOIN campuses c ON c.id = COALESCE(tc.campus_id, t.campus_id) "
-            "ORDER BY target_name",
+            "SELECT tc.id AS target_id, tc.target_type, tc.campus_id, tc.is_central, "
+            "NULL AS office_head_name, tc.name AS target_name, c.name AS campus_name "
+            "FROM user_office_assignments ua "
+            "JOIN target_catalog tc ON tc.id = ua.target_id "
+            "LEFT JOIN campuses c ON c.id = tc.campus_id "
+            "WHERE ua.user_id = %s AND ua.assignment_role = 'member' "
+            "ORDER BY tc.name",
+            (user["id"],),
         )
         open_cycles = [
             cycle
@@ -67,7 +71,6 @@ def evaluator_targets():
                 items.append(
                     {
                         "cycle_id": cycle["cycle_id"],
-                        "cycle_name": cycle["cycle_name"],
                         "target_id": target["target_id"],
                         "target_type": target["target_type"],
                         "target_name": target["target_name"],
@@ -81,7 +84,6 @@ def evaluator_targets():
             items = [
                 {
                     "cycle_id": None,
-                    "cycle_name": None,
                     "target_id": target["target_id"],
                     "target_type": target["target_type"],
                     "target_name": target["target_name"],
@@ -242,6 +244,8 @@ def evaluator_form(target_id: int):
         target = _load_evaluator_target(cursor, target_id)
         if not target:
             raise ApiError("Target not found.", 404)
+        if not _has_evaluator_membership(cursor, user["id"], target_id):
+            raise ApiError("You can evaluate only offices/units selected in your membership.", 403)
         previous = fetch_one(
             cursor,
             "SELECT id FROM participation WHERE user_id = %s AND cycle_id = %s AND target_id = %s",
@@ -287,6 +291,8 @@ def submit_evaluation():
             target = _load_evaluator_target(cursor, target_id)
             if not target:
                 raise ApiError("Target not found.", 404)
+            if not _has_evaluator_membership(cursor, user["id"], target_id):
+                raise ApiError("You can evaluate only offices/units selected in your membership.", 403)
             existing = fetch_one(
                 cursor,
                 "SELECT id FROM participation WHERE user_id = %s AND cycle_id = %s AND target_id = %s",

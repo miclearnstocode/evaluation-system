@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useEffect, useState } from "react";
+import { FormEvent, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { apiFetch } from "../../lib/api";
 import EvaluatorHeader from "../evaluator-header";
@@ -105,6 +105,8 @@ export default function EvaluationForm({
 }) {
   const [form, setForm] = useState<EvaluationFormData | null>(null);
   const [answers, setAnswers] = useState<Record<number, Answer>>({});
+  const [sectionIndex, setSectionIndex] = useState(0);
+  const sectionHeading = useRef<HTMLHeadingElement>(null);
   const [submitted, setSubmitted] = useState(false);
   const [submissionResult, setSubmissionResult] = useState<SubmissionResult | null>(null);
   const [error, setError] = useState(
@@ -123,7 +125,10 @@ export default function EvaluationForm({
       `/api/evaluator/targets/${encodeURIComponent(targetId)}/form?cycle_id=${encodeURIComponent(cycleId)}`,
     )
       .then((data) => {
-        if (active) setForm(data);
+        if (active) {
+          setForm(data);
+          setSectionIndex(0);
+        }
       })
       .catch((requestError: Error) => {
         if (active) setError(requestError.message);
@@ -151,9 +156,41 @@ export default function EvaluationForm({
     );
   }
 
-  async function submit(event: FormEvent<HTMLFormElement>) {
+  const currentSection = form?.sections[sectionIndex];
+  const hasNextSection = Boolean(form && sectionIndex + 1 < form.sections.length);
+
+  function goToSection(index: number, message = "") {
+    setSectionIndex(index);
+    setError(message);
+    requestAnimationFrame(() => {
+      sectionHeading.current?.focus({ preventScroll: true });
+      sectionHeading.current?.scrollIntoView({ block: "start" });
+    });
+  }
+
+  function hasUnansweredRequiredQuestions(section: Section) {
+    return section.questions.some((question) => question.required && !isAnswered(answers[question.id]));
+  }
+
+  async function advanceOrSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!form) return;
+    if (!form || submitting) return;
+    const requiredMessage = "Answer all required questions in this section to continue.";
+    if (currentSection && hasUnansweredRequiredQuestions(currentSection)) {
+      goToSection(sectionIndex, requiredMessage);
+      return;
+    }
+    if (hasNextSection) {
+      goToSection(sectionIndex + 1);
+      return;
+    }
+
+    const incompleteSection = form.sections.findIndex(hasUnansweredRequiredQuestions);
+    if (incompleteSection !== -1) {
+      goToSection(incompleteSection, requiredMessage);
+      return;
+    }
+
     setError("");
     setSubmitting(true);
     try {
@@ -211,6 +248,7 @@ export default function EvaluationForm({
           const max = question.scale_max ?? 5;
           const values = Array.from({ length: max - min + 1 }, (_, index) => min + index)
             .filter((value) => value !== 0);
+          const scaleLabelsId = `scale-labels-${question.id}`;
           return (
             <div className="max-w-xl">
               <div
@@ -218,6 +256,7 @@ export default function EvaluationForm({
                 style={{ gridTemplateColumns: `repeat(${values.length}, minmax(0, 1fr))` }}
                 role="radiogroup"
                 aria-label={question.question_text}
+                aria-describedby={scaleLabelsId}
               >
                 {values.map((value) => {
                   const isSelected = current === value;
@@ -245,12 +284,16 @@ export default function EvaluationForm({
                   );
                 })}
               </div>
-              {(question.min_label || question.max_label) && (
-                <div className="mt-2.5 flex justify-between gap-4 text-xs font-medium text-slate-500">
-                  <span>{question.min_label}</span>
-                  <span className="text-right">{question.max_label}</span>
+              <div id={scaleLabelsId} className="mt-2.5 flex justify-between gap-4 text-xs text-slate-600">
+                <div>
+                  <p className="font-semibold">{values[0]} — Lowest rating</p>
+                  {question.min_label && <p>{question.min_label}</p>}
                 </div>
-              )}
+                <div className="text-right">
+                  <p className="font-semibold">{values[values.length - 1]} — Highest rating</p>
+                  {question.max_label && <p>{question.max_label}</p>}
+                </div>
+              </div>
             </div>
           );
         })()}
@@ -562,23 +605,27 @@ export default function EvaluationForm({
               </div>
             </div>
 
-            <form onSubmit={submit} className="space-y-6">
-              {form.sections.map((section, index) => (
-                <section key={section.id} className="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm">
+            <form onSubmit={advanceOrSubmit} noValidate className="space-y-6">
+              {currentSection && (
+                <section key={currentSection.id} className="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm" aria-labelledby="current-section-title">
                   <header className="flex items-center gap-3 border-b border-slate-100 bg-slate-50/60 px-6 py-4 sm:px-8">
                     <span aria-hidden="true" className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-linear-to-br from-[#1F3A5F] to-[#0F9D8A] text-sm font-bold text-white shadow-sm">
-                      {index + 1}
+                      {sectionIndex + 1}
                     </span>
                     <div>
-                      <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">Section {index + 1}</p>
-                      <h2 className="text-lg font-semibold leading-6 text-[#1F3A5F]">{section.title}</h2>
+                      <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">
+                        Section {sectionIndex + 1} of {form.sections.length}
+                      </p>
+                      <h2 id="current-section-title" ref={sectionHeading} tabIndex={-1} className="scroll-mt-24 text-lg font-semibold leading-6 text-[#1F3A5F]">
+                        {currentSection.title}
+                      </h2>
                     </div>
                   </header>
                   <div className="divide-y divide-slate-100 px-6 py-7 sm:px-8">
-                    {section.questions.map(renderQuestion)}
+                    {currentSection.questions.map(renderQuestion)}
                   </div>
                 </section>
-              ))}
+              )}
 
               {error && (
                 <div role="alert" className="flex items-start gap-3 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
@@ -591,15 +638,16 @@ export default function EvaluationForm({
                 </div>
               )}
 
-              {/* Submit panel */}
-              <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-lg shadow-slate-200/50 sm:p-8">
-                <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-                  <div>
-                    <p className="text-sm font-semibold text-slate-800">Ready to submit?</p>
-                    <p className="mt-1 text-sm text-slate-600">
-                      {answeredQuestions} of {totalQuestions} questions answered. Please review your answers before submitting.
-                    </p>
-                  </div>
+              <nav aria-label="Evaluation sections" className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm sm:px-8">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <button
+                    type="button"
+                    disabled={sectionIndex === 0 || submitting}
+                    onClick={() => goToSection(sectionIndex - 1)}
+                    className="rounded-xl border border-slate-300 px-5 py-3 text-sm font-semibold text-slate-700 transition hover:border-teal-600 hover:text-teal-800 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    Previous section
+                  </button>
                   <button
                     type="submit"
                     disabled={submitting}
@@ -615,7 +663,7 @@ export default function EvaluationForm({
                       </>
                     ) : (
                       <>
-                        Submit evaluation
+                        {hasNextSection ? "Next section" : "Submit evaluation"}
                         <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4 transition group-hover:translate-x-0.5" aria-hidden="true">
                           <line x1="5" y1="12" x2="19" y2="12" />
                           <polyline points="12 5 19 12 12 19" />
@@ -624,7 +672,7 @@ export default function EvaluationForm({
                     )}
                   </button>
                 </div>
-              </div>
+              </nav>
             </form>
           </>
         ) : null}

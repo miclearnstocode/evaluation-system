@@ -111,7 +111,7 @@ def _retract_submission(cursor: Any, submission_token: str) -> None:
     )
     for answer in answers:
         value = answer["answer_value"]
-        if isinstance(value, str):
+        if isinstance(value, (str, bytes, bytearray)):
             value = json.loads(value)
         if answer["question_type"] == "text":
             continue
@@ -943,7 +943,7 @@ def office_standing():
                 }
                 for row in target_scores:
                     section_scores = row["section_scores"]
-                    if isinstance(section_scores, str):
+                    if isinstance(section_scores, (str, bytes, bytearray)):
                         section_scores = json.loads(section_scores)
                     for section_score in section_scores:
                         section_id = section_score["section_id"]
@@ -1034,6 +1034,112 @@ def list_submissions():
     return jsonify(items=items, office_mean=office_mean)
 
 
+@bp.get("/api/admin/super-admin/submissions")
+@require_role("super_admin")
+def list_super_admin_submissions():
+    cycle_id = _positive_id(request.args.get("cycle_id"), "cycle_id")
+    target_id = _positive_id(request.args.get("target_id"), "target_id")
+    actor = request_user()
+    with connection() as conn:
+        cursor = conn.cursor(dictionary=True)
+        cycle = fetch_one(
+            cursor,
+            "SELECT id, status FROM eval_cycles WHERE id = %s",
+            (cycle_id,),
+        )
+        if not cycle or cycle["status"] not in {"open", "closed"}:
+            raise ApiError("Submissions are available only for open or closed cycles.", 409)
+        if not _load_cycle_target(cursor, cycle_id, target_id):
+            raise ApiError("Target not found in this cycle.", 404)
+
+        items = fetch_all(
+            cursor,
+            "SELECT u.id AS user_id, u.first_name, u.last_name, u.email AS evaluator_email, "
+            "p.submission_token, p.submitted_at, ers.total_score, ers.mean_score "
+            "FROM users u "
+            "LEFT JOIN participation p ON p.user_id = u.id AND p.cycle_id = %s AND p.target_id = %s "
+            "LEFT JOIN evaluator_response_scores ers ON ers.score_link_token = p.submission_token "
+            "WHERE u.role = 'evaluator' AND u.active = 1 "
+            "ORDER BY u.first_name, u.last_name",
+            (cycle_id, target_id),
+        )
+        valid_scores = []
+        for item in items:
+            item["full_name"] = " ".join(
+                part for part in (item.get("first_name"), item.get("last_name")) if part
+            ) or item.get("evaluator_email")
+            if item["total_score"] is not None:
+                item["total_score"] = float(item["total_score"])
+            if item["mean_score"] is not None:
+                item["mean_score"] = float(item["mean_score"])
+                valid_scores.append(Decimal(str(item["mean_score"])))
+            if item["submitted_at"] is not None:
+                item["submitted_at"] = str(item["submitted_at"])
+
+        office_mean = _average_scores(valid_scores)
+        _audit(cursor, actor, "view", "submission_list", f"{cycle_id}:{target_id}")
+        conn.commit()
+        cursor.close()
+
+    return jsonify(items=items, office_mean=office_mean)
+
+
+@bp.get("/api/admin/super-admin/submissions/<submission_token>/comments")
+@require_role("super_admin")
+def super_admin_submission_comments(submission_token: str):
+    try:
+        submission_token = str(uuid.UUID(submission_token))
+    except (AttributeError, TypeError, ValueError):
+        raise ApiError("Submission not found.", 404) from None
+
+    actor = request_user()
+    with connection() as conn:
+        cursor = conn.cursor(dictionary=True)
+        submission = fetch_one(
+            cursor,
+            "SELECT cycle_id, target_id FROM participation WHERE submission_token = %s",
+            (submission_token,),
+        )
+        if not submission:
+            raise ApiError("Submission not found.", 404)
+        cycle = fetch_one(
+            cursor,
+            "SELECT status, opens_at, closes_at FROM eval_cycles WHERE id = %s",
+            (submission["cycle_id"],),
+        )
+        if not cycle or not (_cycle_is_open(cycle) or _cycle_is_closed(cycle)):
+            raise ApiError("Comments are available only for open or closed cycles.", 409)
+        if not _load_cycle_target(cursor, submission["cycle_id"], submission["target_id"]):
+            raise ApiError("Target not found in this cycle.", 404)
+
+        comments = fetch_all(
+            cursor,
+            "SELECT cm.id, cm.question_id, cm.comment_text AS body, cm.status, "
+            "q.prompt AS question "
+            "FROM comments cm JOIN questions q ON q.id = cm.question_id "
+            "WHERE cm.submission_token = %s ORDER BY q.sort_order, q.id",
+            (submission_token,),
+        )
+        visible_comments = [
+            {
+                **comment,
+                "body": _redact_email_addresses(comment["body"]),
+            }
+            for comment in comments
+        ]
+        _audit(
+            cursor,
+            actor,
+            "view",
+            "submission_comments",
+            f"{submission['cycle_id']}:{submission['target_id']}",
+        )
+        conn.commit()
+        cursor.close()
+
+    return jsonify(items=visible_comments)
+
+
 @bp.post("/api/admin/submissions/review")
 @require_role("admin")
 def review_submission():
@@ -1068,7 +1174,7 @@ def review_submission():
         )
         for answer in answers:
             value = answer["answer_value"]
-            if isinstance(value, str):
+            if isinstance(value, (str, bytes, bytearray)):
                 value = json.loads(value)
             if answer["question_type"] == "single_choice":
                 option = fetch_one(
@@ -1239,7 +1345,7 @@ def results():
         response_answers: dict[str, dict[str, Any]] = {}
         for row in score_rows:
             section_scores = row["section_scores"]
-            if isinstance(section_scores, str):
+            if isinstance(section_scores, (str, bytes, bytearray)):
                 section_scores = json.loads(section_scores)
             response_answers[row["response_id"]] = {
                 "answers": {},
@@ -1255,7 +1361,7 @@ def results():
             if not question:
                 continue
             answer_value = row["answer_value"]
-            if isinstance(answer_value, str):
+            if isinstance(answer_value, (str, bytes, bytearray)):
                 answer_value = json.loads(answer_value)
             if question["type"] == "single_choice":
                 answer_value = next(
@@ -1298,7 +1404,7 @@ def results():
                     "GROUP BY option_key ORDER BY option_key",
                     (cycle_id, target_id, question["id"]),
                 )
-                value_count = sum(row["count"] for row in distributions)
+                value_count = sum(int(row["count"]) for row in distributions)
                 normalized_distributions = []
                 for row in distributions:
                     value = row["option_key"]
@@ -1306,7 +1412,9 @@ def results():
                         value = int(value)
                     elif value.isdigit():
                         value = int(value)
-                    normalized_distributions.append({**row, "value": value})
+                    normalized_distributions.append(
+                        {**row, "value": value, "count": int(row["count"])}
+                    )
                 mean = (
                     round(sum(row["value"] * row["count"] for row in normalized_distributions) / value_count, 2)
                     if question["type"] in {"scale", "rating", "yes_no"} and value_count

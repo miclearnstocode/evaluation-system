@@ -43,6 +43,23 @@ OFFICE_SECTION_LABELS = {
     "director": "Director",
 }
 
+STUDENT_LEADER_DIRECTOR_CODES = {
+    "STUDENT_AFFAIRS", "SPORTS", "CULTURAL",
+    "DIR_SAS", "DIR_SPORTS", "DIR_CULTURAL",
+}
+
+BAC_ONLY_ROLES = {"campus_administrator_satellite_director", "director"}
+BAC_OFFICE_CODES = {"BAC", "DIR_BAC"}
+STUDENT_CAPSU_EMAIL = re.compile(r"[^@\s]+@student\.capsu\.edu\.ph", re.IGNORECASE)
+
+
+def _student_leader_office_allowed(target_type, code, campus_matches):
+    if target_type in {"campus_administrator", "satellite_college_director"}:
+        return campus_matches
+    return target_type == "vice_president" or (
+        target_type == "director" and code in STUDENT_LEADER_DIRECTOR_CODES
+    )
+
 
 def _password_matches(password_hash: str, password: str) -> bool:
     if password_hash.startswith(("$2a$", "$2b$", "$2y$")):
@@ -114,9 +131,10 @@ def registration_options():
             if has_campus:
                 rows = fetch_all(
                     cursor,
-                    f"SELECT code, title AS name FROM `{table}` "
-                    "WHERE campus_id IN (SELECT id FROM campuses WHERE active = 1) "
-                    "ORDER BY id",
+                    f"SELECT office.code, office.title AS name, c.location_code AS campus_code "
+                    f"FROM `{table}` office "
+                    "JOIN campuses c ON c.id = office.campus_id AND c.active = 1 "
+                    "ORDER BY office.id",
                 )
             else:
                 rows = fetch_all(
@@ -126,6 +144,7 @@ def registration_options():
 
             section_offices = []
             for row in rows:
+                campus_code = row.get("campus_code")
                 entry = {
                     "code": row["code"],
                     "name": row["name"],
@@ -139,6 +158,10 @@ def registration_options():
                         "name": row["name"],
                         "unit_code": row["code"],
                         "target_type": target_type,
+                        "campus_code": campus_code,
+                        "student_leader_available": _student_leader_office_allowed(
+                            target_type, row["code"], campus_code is not None
+                        ),
                     }
                 )
                 if category == "campus_office":
@@ -184,8 +207,9 @@ def register():
     years_of_service = payload.get("years_of_service")
     role_codes = {item["value"] for item in POSITION_ROLES}
 
-    if not isinstance(email, str) or not CAPSU_EMAIL.fullmatch(email.strip()):
-        raise ApiError("Use your @capsu.edu.ph university email address.")
+    normalized_email = email.strip().lower() if isinstance(email, str) else ""
+    if not (CAPSU_EMAIL.fullmatch(normalized_email) or STUDENT_CAPSU_EMAIL.fullmatch(normalized_email)):
+        return "", 204
     if not isinstance(password, str) or len(password) < 12:
         raise ApiError("Password must contain at least 12 characters.")
     if (
@@ -213,7 +237,6 @@ def register():
     if not isinstance(location_code, str):
         raise ApiError("Select a valid campus or office location.")
 
-    normalized_email = email.strip().lower()
     with connection() as conn:
         cursor = conn.cursor(dictionary=True)
         try:
@@ -260,6 +283,23 @@ def register():
 
             if any(len(offices_by_code.get(code, [])) != 1 for code in office_unit_codes):
                 raise ApiError("One of the selected Offices/Units is unavailable.", 409)
+            for code in office_unit_codes:
+                office = offices_by_code[code][0]
+                if position_role in BAC_ONLY_ROLES and (
+                    office["target_type"] != "director" or code not in BAC_OFFICE_CODES
+                ):
+                    raise ApiError("Only the Office of the Bids and Awards Committee (BAC) is available for this position.")
+                if position_role == "vice_president" and office["target_type"] in {
+                    "vice_president", "campus_administrator", "satellite_college_director"
+                }:
+                    raise ApiError("Select a Director, RDE Director, or RDE Center office for this position.")
+                campus_matches = office["campus_id"] == campus["id"]
+                if office["campus_id"] is not None and not campus_matches:
+                    raise ApiError("Select the campus office for your chosen campus.")
+                if position_role == "student_leader" and not _student_leader_office_allowed(
+                    office["target_type"], code, campus_matches
+                ):
+                    raise ApiError("Select offices available to Student Leaders at your campus.")
             if any(
                 offices_by_code[code][0]["target_id"] is not None
                 and not offices_by_code[code][0]["target_active"]

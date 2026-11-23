@@ -6,7 +6,14 @@ import { apiFetch } from "../lib/api";
 import type { TargetType } from "../lib/targets";
 
 type SelectOption = { value: string; label: string };
-type MembershipOption = { id: string; name: string; unit_code: string; target_type: TargetType };
+type MembershipOption = {
+  id: string;
+  name: string;
+  unit_code: string;
+  target_type: TargetType;
+  campus_code: string | null;
+  student_leader_available: boolean;
+};
 type RegistrationOptions = {
   position_roles: SelectOption[];
   locations: { code: string; name: string }[];
@@ -19,6 +26,40 @@ const fieldClassName =
   "mt-1.5 w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-teal-600 focus:ring-4 focus:ring-teal-600/10 disabled:bg-slate-100 disabled:text-slate-500";
 
 const labelClassName = "block text-sm font-semibold text-slate-700";
+
+const facultyOfficeOrder: Record<TargetType, number> = {
+  vice_president: 0,
+  campus_administrator: 1,
+  satellite_college_director: 2,
+  director: 3,
+  rde_director: 4,
+  rde_center_director: 5,
+};
+
+const bacOnlyRoles = new Set(["campus_administrator_satellite_director", "director"]);
+const bacOfficeCodes = new Set(["BAC", "DIR_BAC"]);
+
+function officeAvailable(office: MembershipOption, role: string, campus: string) {
+  if (bacOnlyRoles.has(role)) {
+    return office.target_type === "director" && bacOfficeCodes.has(office.unit_code);
+  }
+
+  if (role === "student_leader" && !office.student_leader_available) {
+    return false;
+  }
+
+  const isCampusOffice =
+    office.target_type === "campus_administrator" ||
+    office.target_type === "satellite_college_director";
+  if (role === "vice_president" && (isCampusOffice || office.target_type === "vice_president")) {
+    return false;
+  }
+  if (isCampusOffice) {
+    return campus !== "" && office.campus_code === campus;
+  }
+
+  return true;
+}
 
 function EyeIcon({ open }: { open: boolean }) {
   return open ? (
@@ -82,6 +123,7 @@ export default function RegisterPage() {
   const [firstName, setFirstName] = useState("");
   const [lastName, setLastName] = useState("");
   const [email, setEmail] = useState("");
+  const [showEmailHelp, setShowEmailHelp] = useState(false);
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
@@ -111,9 +153,26 @@ export default function RegisterPage() {
     };
   }, []);
 
-  const officeChoices = options?.memberships ?? [];
+  const officeSections = (options?.office_sections ?? []).map((section) => ({
+    ...section,
+    offices: section.offices.filter((office) => officeAvailable(office, positionRole, locationCode)),
+  })).filter((section) => section.offices.length > 0);
+  if (positionRole === "teaching_faculty") {
+    officeSections.sort((first, second) =>
+      facultyOfficeOrder[first.target_type] - facultyOfficeOrder[second.target_type],
+    );
+  }
+  const officeChoices = officeSections.flatMap((section) => section.offices);
   const isStudentLeader = positionRole === "student_leader";
   const passwordMismatch = confirmPassword.length > 0 && password !== confirmPassword;
+
+  function retainAvailableOffices(role: string, campus: string) {
+    setSelectedOfficeCodes((current) => current.filter((code) =>
+      options?.memberships.some((office) =>
+        office.unit_code === code && officeAvailable(office, role, campus),
+      ),
+    ));
+  }
 
   async function handleRegister(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -138,7 +197,7 @@ export default function RegisterPage() {
     setLoading(true);
     try {
       const normalizedEmail = email.trim().toLowerCase();
-      await apiFetch("/api/auth/register", {
+      const result = await apiFetch<{ status?: string }>("/api/auth/register", {
         method: "POST",
         body: JSON.stringify({
           email: normalizedEmail,
@@ -151,6 +210,9 @@ export default function RegisterPage() {
           years_of_service: isStudentLeader ? null : yearsOfService,
         }),
       });
+      if (result.status !== "registered") {
+        return;
+      }
       setRegistered(true);
       setNotice("Your account is active. You can sign in now.");
     } catch (requestError) {
@@ -354,6 +416,7 @@ export default function RegisterPage() {
                             value={positionRole}
                             onChange={(event) => {
                               setPositionRole(event.target.value);
+                              retainAvailableOffices(event.target.value, locationCode);
                               if (event.target.value === "student_leader") {
                                 setYearsOfService("");
                               }
@@ -375,7 +438,10 @@ export default function RegisterPage() {
                           <select
                             id="campus-location"
                             value={locationCode}
-                            onChange={(event) => setLocationCode(event.target.value)}
+                            onChange={(event) => {
+                              setLocationCode(event.target.value);
+                              retainAvailableOffices(positionRole, event.target.value);
+                            }}
                             required
                             className={fieldClassName}
                           >
@@ -409,11 +475,11 @@ export default function RegisterPage() {
                     </StepCard>
 
                     {/* Step 3: Office membership */}
-                    <StepCard step={3} title="Office/Unit membership" description="Optional — select all that apply.">
+                    <StepCard step={3} title="Office/Unit membership" description="Optional: select the offices/units you belong to.">
                       <fieldset aria-describedby="office-membership-help">
                         <div className="mb-3 flex items-center justify-between">
                           <p id="office-membership-help" className="text-xs leading-5 text-slate-500">
-                            Select all offices/units that apply, if any.
+                            You can evaluate only the offices/units selected here.
                           </p>
                           <span className="rounded-full bg-teal-50 px-2.5 py-0.5 text-xs font-semibold text-teal-700 ring-1 ring-teal-600/20">
                             {selectedOfficeCodes.length} selected
@@ -425,7 +491,7 @@ export default function RegisterPage() {
                           </p>
                         ) : (
                           <div className="max-h-72 space-y-4 overflow-y-auto pr-1">
-                            {options.office_sections.map(({ target_type, label, offices }) => (
+                            {officeSections.map(({ target_type, label, offices }) => (
                               <fieldset key={target_type}>
                                 <legend className="mb-2 text-sm font-semibold text-slate-700">{label}</legend>
                                 <div className="grid gap-2 sm:grid-cols-2">
@@ -467,17 +533,41 @@ export default function RegisterPage() {
                     </StepCard>
 
                     {/* Step 4: Account credentials */}
-                    <StepCard step={4} title="Account credentials" description="Use your CAPSU email and a strong password.">
+                    <StepCard step={4} title="Account credentials" description="Enter your email address and choose a strong password.">
                       <div className="space-y-5">
-                        <div>
-                          <label htmlFor="register-email" className={labelClassName}>
-                            CAPSU email address <span className="text-red-500">*</span>
-                          </label>
+                        <div onKeyDown={(event) => {
+                          if (event.key === "Escape") setShowEmailHelp(false);
+                        }}>
+                          <div className="relative flex items-center gap-2">
+                            <label htmlFor="register-email" className={labelClassName}>
+                              Email address <span className="text-red-500">*</span>
+                            </label>
+                            <button
+                              type="button"
+                              aria-label="Accepted email addresses"
+                              aria-expanded={showEmailHelp}
+                              aria-controls="register-email-help"
+                              onClick={() => setShowEmailHelp((visible) => !visible)}
+                              className="inline-flex h-6 w-6 items-center justify-center rounded-full border border-slate-300 text-xs font-semibold text-slate-600 hover:border-teal-600 hover:text-teal-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-teal-600"
+                            >
+                              ?
+                            </button>
+                            <div
+                              id="register-email-help"
+                              hidden={!showEmailHelp}
+                              className="absolute bottom-full left-0 z-10 mb-2 w-80 max-w-full rounded-xl border border-slate-700 bg-slate-900 px-4 py-3 text-sm leading-5 text-slate-100 shadow-xl"
+                            >
+                              <p className="font-semibold text-white">Which email should I use?</p>
+                              <p className="mt-1 text-slate-200">
+                                Use your CAPSU email address. Student Leaders can also use their student CAPSU email address.
+                              </p>
+                            </div>
+                          </div>
                           <input
                             id="register-email"
+                            aria-describedby={showEmailHelp ? "register-email-help" : undefined}
                             type="email"
                             autoComplete="email"
-                            placeholder="you@capsu.edu.ph"
                             value={email}
                             onChange={(event) => setEmail(event.target.value)}
                             required

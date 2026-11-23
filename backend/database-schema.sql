@@ -133,7 +133,14 @@ CREATE TABLE users (
   last_name VARCHAR(100) NULL,
   role ENUM('super_admin', 'evaluator', 'admin') NOT NULL DEFAULT 'evaluator',
   campus_id INT NULL,
-  position_role ENUM('teaching_faculty', 'non_teaching_staff', 'student_leader') NULL,
+  position_role ENUM(
+    'teaching_faculty',
+    'non_teaching_staff',
+    'student_leader',
+    'campus_administrator_satellite_director',
+    'director',
+    'vice_president'
+  ) NULL,
   years_of_service ENUM('lt_1', '1_5', '6_10', '11_plus') NULL,
   is_central_staff TINYINT(1) NOT NULL DEFAULT 0,
   active TINYINT(1) NOT NULL DEFAULT 1,
