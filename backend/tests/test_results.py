@@ -347,13 +347,11 @@ class AdminResultsTests(unittest.TestCase):
                 "target_id": 9,
                 "mean_score": "4.00",
                 "section_scores": '[{"section_id":1,"title":"Service","score":8.0}]',
-                "evaluator_email": "first@capsu.edu.ph",
             },
             {
                 "target_id": 9,
                 "mean_score": "2.00",
                 "section_scores": '[{"section_id":1,"title":"Service","score":4.0}]',
-                "evaluator_email": "second@capsu.edu.ph",
             },
         ]
 
@@ -367,6 +365,7 @@ class AdminResultsTests(unittest.TestCase):
             if "FROM sections" in query:
                 return [{"id": 1, "title": "Service"}]
             if "FROM evaluator_response_scores" in query:
+                self.assertNotIn("email", query)
                 return score_rows
             if "FROM cycle_targets" in query:
                 return targets
@@ -390,8 +389,8 @@ class AdminResultsTests(unittest.TestCase):
             {"section_id": 1, "title": "Service", "mean_score": 6.0},
         ])
         self.assertEqual(item["evaluator_means"], [
-            {"name": "first@capsu.edu.ph", "email": "first@capsu.edu.ph", "mean_score": 4.0},
-            {"name": "second@capsu.edu.ph", "email": "second@capsu.edu.ph", "mean_score": 2.0},
+            {"evaluator_number": 1, "mean_score": 4.0},
+            {"evaluator_number": 2, "mean_score": 2.0},
         ])
 
     def test_super_admin_result_options_include_only_active_cycle_targets(self):
@@ -405,6 +404,7 @@ class AdminResultsTests(unittest.TestCase):
             "campus_id": None,
             "is_central": 1,
             "campus_name": None,
+            "office_head_name": "Dr. Alex Rivera",
         }
 
         @contextmanager
@@ -416,13 +416,14 @@ class AdminResultsTests(unittest.TestCase):
         ), patch("backend.routes.admin.connection", fake_connection), patch(
             "backend.routes.admin.fetch_all",
             side_effect=[[cycle], [{"target_id": 9}], [target]],
-        ):
+        ) as fetch_all:
             client = app.test_client()
             with client.session_transaction() as session:
                 session["user_id"] = 1
             response = client.get("/api/admin/results/options")
 
         self.assertEqual(response.status_code, 200)
+        self.assertIn("t.office_head_name", fetch_all.call_args.args[1])
         self.assertEqual(response.get_json(), {"cycles": [{**cycle, "target_ids": [9]}], "targets": [target]})
 
     def test_submission_list_includes_evaluator_email_for_admin_review(self):
@@ -465,15 +466,15 @@ class AdminResultsTests(unittest.TestCase):
         cycle = {"id": 3, "status": "closed"}
         items = [
             {
-                "user_id": 7,
-                "first_name": "Avery",
-                "last_name": "User",
-                "evaluator_email": "avery@capsu.edu.ph",
-                "submission_token": "123e4567-e89b-12d3-a456-426614174000",
-                "submitted_at": datetime(2026, 11, 23, 9, 0),
+                "submitted": 1,
                 "total_score": Decimal("155.00"),
                 "mean_score": Decimal("22.14"),
-            }
+            },
+            {
+                "submitted": 0,
+                "total_score": None,
+                "mean_score": None,
+            },
         ]
 
         @contextmanager
@@ -502,10 +503,14 @@ class AdminResultsTests(unittest.TestCase):
         body = response.get_json()
         self.assertEqual(body["items"][0]["total_score"], 155.0)
         self.assertEqual(body["items"][0]["mean_score"], 22.14)
-        self.assertEqual(body["items"][0]["full_name"], "Avery User")
+        self.assertEqual([item["evaluator_number"] for item in body["items"]], [1, 2])
+        self.assertEqual(
+            set(body["items"][0]),
+            {"evaluator_number", "submitted", "total_score", "mean_score"},
+        )
         self.assertEqual(body["office_mean"], 22.14)
 
-    def test_super_admin_can_view_redacted_comments_for_a_submission(self):
+    def test_super_admin_can_view_anonymous_comments_for_an_office(self):
         app = create_app({"SECRET_KEY": "test-secret", "TESTING": True})
         connection = ResultsConnection()
         token = "123e4567-e89b-12d3-a456-426614174000"
@@ -532,10 +537,7 @@ class AdminResultsTests(unittest.TestCase):
             "backend.core._current_user", return_value={"id": 1, "role": "super_admin"}
         ), patch("backend.routes.admin.connection", fake_connection), patch(
             "backend.routes.admin.fetch_one",
-            side_effect=[
-                {"cycle_id": 3, "target_id": 9},
-                cycle,
-            ],
+            return_value=cycle,
         ), patch(
             "backend.routes.admin._load_cycle_target",
             return_value={"target_name": "Office Alpha"},
@@ -545,18 +547,18 @@ class AdminResultsTests(unittest.TestCase):
             client = app.test_client()
             with client.session_transaction() as session:
                 session["user_id"] = 1
-            response = client.get(
-                f"/api/admin/super-admin/submissions/{token}/comments"
-            )
+            response = client.get("/api/admin/super-admin/comments?cycle_id=3&target_id=9")
+            old_response = client.get(f"/api/admin/super-admin/submissions/{token}/comments")
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(
             response.get_json()["items"][0]["body"],
             "Please contact me at [email redacted]",
         )
-        self.assertEqual(response.get_json()["items"][0]["status"], "pending")
+        self.assertEqual(set(response.get_json()["items"][0]), {"question", "body"})
+        self.assertIn(old_response.status_code, {404, 405})
 
-    def test_submission_comments_are_not_available_to_regular_admins(self):
+    def test_super_admin_office_comments_route_requires_super_admin(self):
         app = create_app({"SECRET_KEY": "test-secret", "TESTING": True})
         with patch(
             "backend.core._current_user", return_value={"id": 1, "role": "admin"}
@@ -565,7 +567,7 @@ class AdminResultsTests(unittest.TestCase):
             with client.session_transaction() as session:
                 session["user_id"] = 1
             response = client.get(
-                "/api/admin/super-admin/submissions/123e4567-e89b-12d3-a456-426614174000/comments"
+                "/api/admin/super-admin/comments?cycle_id=3&target_id=9"
             )
 
         self.assertEqual(response.status_code, 403)
@@ -842,15 +844,12 @@ class AdminResultsTests(unittest.TestCase):
         self.assertEqual(body["questions"][0]["mean"], 4.0)
         self.assertNotIn("comments", body["questions"][1])
         self.assertEqual(len(body["individual_responses"]), 1)
-        self.assertEqual(len(body["individual_responses"][0]["answers"]), 2)
+        self.assertEqual(len(body["individual_responses"][0]["answers"]), 1)
         self.assertEqual(body["individual_responses"][0]["total_score"], 8.0)
         self.assertEqual(body["individual_responses"][0]["mean_score"], 4.0)
         self.assertEqual(body["individual_responses"][0]["section_scores"][0]["score"], 8.0)
         self.assertEqual(body["individual_responses"][0]["answers"][0]["score"], 8.0)
-        self.assertEqual(
-            body["individual_responses"][0]["answers"][1]["answer"],
-            "Please email me at [email redacted]",
-        )
+        self.assertNotIn("Please email me", response.get_data(as_text=True))
         self.assertNotIn("private-response-id", response.get_data(as_text=True))
         self.assertNotIn("mmestorque@capsu.edu.ph", response.get_data(as_text=True))
         self.assertFalse(any("FROM comments" in call.args[1] for call in fetch_all.call_args_list))

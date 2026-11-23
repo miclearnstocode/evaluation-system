@@ -895,12 +895,10 @@ def office_standing():
             )
             score_rows = fetch_all(
                 cursor,
-                "SELECT ers.target_id, ers.mean_score, ers.section_scores, "
-                "u.email AS evaluator_email "
+                "SELECT ers.target_id, ers.mean_score, ers.section_scores "
                 "FROM evaluator_response_scores ers "
                 "JOIN participation p ON p.submission_token = ers.score_link_token "
-                "JOIN users u ON u.id = p.user_id "
-                "WHERE ers.cycle_id = %s ORDER BY ers.target_id, p.submitted_at",
+                "WHERE ers.cycle_id = %s ORDER BY ers.target_id, p.submitted_at, p.id",
                 (cycle["id"],),
             )
         else:
@@ -961,13 +959,10 @@ def office_standing():
                 ]
                 item["evaluator_means"] = [
                     {
-                        "name": " ".join(
-                            part for part in (row.get("first_name"), row.get("last_name")) if part
-                        ) or row["evaluator_email"],
-                        "email": row["evaluator_email"],
+                        "evaluator_number": number,
                         "mean_score": float(row["mean_score"]),
                     }
-                    for row in target_scores
+                    for number, row in enumerate(target_scores, start=1)
                 ]
             items.append(item)
 
@@ -1054,27 +1049,23 @@ def list_super_admin_submissions():
 
         items = fetch_all(
             cursor,
-            "SELECT u.id AS user_id, u.first_name, u.last_name, u.email AS evaluator_email, "
-            "p.submission_token, p.submitted_at, ers.total_score, ers.mean_score "
+            "SELECT p.submission_token IS NOT NULL AS submitted, ers.total_score, ers.mean_score "
             "FROM users u "
             "LEFT JOIN participation p ON p.user_id = u.id AND p.cycle_id = %s AND p.target_id = %s "
             "LEFT JOIN evaluator_response_scores ers ON ers.score_link_token = p.submission_token "
             "WHERE u.role = 'evaluator' AND u.active = 1 "
-            "ORDER BY u.first_name, u.last_name",
+            "ORDER BY u.id",
             (cycle_id, target_id),
         )
         valid_scores = []
-        for item in items:
-            item["full_name"] = " ".join(
-                part for part in (item.get("first_name"), item.get("last_name")) if part
-            ) or item.get("evaluator_email")
+        for number, item in enumerate(items, start=1):
+            item["evaluator_number"] = number
             if item["total_score"] is not None:
                 item["total_score"] = float(item["total_score"])
             if item["mean_score"] is not None:
                 item["mean_score"] = float(item["mean_score"])
                 valid_scores.append(Decimal(str(item["mean_score"])))
-            if item["submitted_at"] is not None:
-                item["submitted_at"] = str(item["submitted_at"])
+            item["submitted"] = bool(item["submitted"])
 
         office_mean = _average_scores(valid_scores)
         _audit(cursor, actor, "view", "submission_list", f"{cycle_id}:{target_id}")
@@ -1084,60 +1075,34 @@ def list_super_admin_submissions():
     return jsonify(items=items, office_mean=office_mean)
 
 
-@bp.get("/api/admin/super-admin/submissions/<submission_token>/comments")
+@bp.get("/api/admin/super-admin/comments")
 @require_role("super_admin")
-def super_admin_submission_comments(submission_token: str):
-    try:
-        submission_token = str(uuid.UUID(submission_token))
-    except (AttributeError, TypeError, ValueError):
-        raise ApiError("Submission not found.", 404) from None
-
-    actor = request_user()
+def super_admin_office_comments():
+    cycle_id = _positive_id(request.args.get("cycle_id"), "cycle_id")
+    target_id = _positive_id(request.args.get("target_id"), "target_id")
     with connection() as conn:
         cursor = conn.cursor(dictionary=True)
-        submission = fetch_one(
-            cursor,
-            "SELECT cycle_id, target_id FROM participation WHERE submission_token = %s",
-            (submission_token,),
-        )
-        if not submission:
-            raise ApiError("Submission not found.", 404)
-        cycle = fetch_one(
-            cursor,
-            "SELECT status, opens_at, closes_at FROM eval_cycles WHERE id = %s",
-            (submission["cycle_id"],),
-        )
-        if not cycle or not (_cycle_is_open(cycle) or _cycle_is_closed(cycle)):
+        cycle = fetch_one(cursor, "SELECT status FROM eval_cycles WHERE id = %s", (cycle_id,))
+        if not cycle or cycle["status"] not in {"open", "closed"}:
             raise ApiError("Comments are available only for open or closed cycles.", 409)
-        if not _load_cycle_target(cursor, submission["cycle_id"], submission["target_id"]):
+        if not _load_cycle_target(cursor, cycle_id, target_id):
             raise ApiError("Target not found in this cycle.", 404)
-
         comments = fetch_all(
             cursor,
-            "SELECT cm.id, cm.question_id, cm.comment_text AS body, cm.status, "
-            "q.prompt AS question "
+            "SELECT q.prompt AS question, cm.comment_text AS body "
             "FROM comments cm JOIN questions q ON q.id = cm.question_id "
-            "WHERE cm.submission_token = %s ORDER BY q.sort_order, q.id",
-            (submission_token,),
+            "WHERE cm.cycle_id = %s AND cm.target_id = %s "
+            "ORDER BY q.sort_order, q.id, SHA2(cm.comment_text, 256)",
+            (cycle_id, target_id),
         )
-        visible_comments = [
-            {
-                **comment,
-                "body": _redact_email_addresses(comment["body"]),
-            }
-            for comment in comments
+        items = [
+            {"question": row["question"], "body": _redact_email_addresses(row["body"])}
+            for row in comments
         ]
-        _audit(
-            cursor,
-            actor,
-            "view",
-            "submission_comments",
-            f"{submission['cycle_id']}:{submission['target_id']}",
-        )
+        _audit(cursor, request_user(), "view", "office_comments", f"{cycle_id}:{target_id}")
         conn.commit()
         cursor.close()
-
-    return jsonify(items=visible_comments)
+    return jsonify(items=items)
 
 
 @bp.post("/api/admin/submissions/review")
@@ -1270,8 +1235,9 @@ def results_options():
             targets = fetch_all(
                 cursor,
                 "SELECT tc.id, tc.name, tc.target_type, tc.campus_id, "
-                "tc.is_central, c.name AS campus_name "
-                "FROM target_catalog tc LEFT JOIN campuses c ON c.id = tc.campus_id "
+                "tc.is_central, c.name AS campus_name, t.office_head_name "
+                "FROM target_catalog tc JOIN targets t ON t.id = tc.id "
+                "LEFT JOIN campuses c ON c.id = tc.campus_id "
                 f"WHERE tc.id IN ({placeholders}) AND tc.active = 1 "
                 "AND (tc.campus_id IS NULL OR c.active = 1) ORDER BY tc.name",
                 tuple(target_ids),
@@ -1329,11 +1295,8 @@ def results():
         )
         score_rows = fetch_all(
             cursor,
-            "SELECT ers.response_id, ers.total_score, ers.mean_score, ers.section_scores, "
-            "u.first_name, u.last_name, u.email AS evaluator_email "
+            "SELECT ers.response_id, ers.total_score, ers.mean_score, ers.section_scores "
             "FROM evaluator_response_scores ers "
-            "LEFT JOIN participation p ON p.submission_token = ers.score_link_token "
-            "LEFT JOIN users u ON u.id = p.user_id "
             "WHERE ers.cycle_id = %s AND ers.target_id = %s ORDER BY RAND()",
             (cycle_id, target_id),
         )
@@ -1358,7 +1321,7 @@ def results():
             }
         for row in answer_rows:
             question = questions_by_id.get(row["question_id"])
-            if not question:
+            if not question or question["type"] == "text":
                 continue
             answer_value = row["answer_value"]
             if isinstance(answer_value, (str, bytes, bytearray)):
@@ -1373,8 +1336,6 @@ def results():
                 answer_value = [option_labels.get(value, str(value)) for value in answer_value]
             elif question["type"] == "yes_no":
                 answer_value = "Yes" if answer_value else "No"
-            elif question["type"] == "text":
-                answer_value = _redact_email_addresses(answer_value)
             response = response_answers.setdefault(row["response_id"], {"answers": {}})
             response["answers"][row["question_id"]] = {
                 "question": question["question_text"],
@@ -1542,3 +1503,52 @@ def audit_log():
         )
         cursor.close()
     return jsonify(items=rows)
+
+@bp.get("/api/admin/results/summary")
+@require_role("super_admin")
+def cycle_results_summary():
+    cycle_id = _positive_id(request.args.get("cycle_id"), "cycle_id")
+    with connection() as conn:
+        cursor = conn.cursor(dictionary=True)
+        cycle = fetch_one(cursor, "SELECT title AS name, status FROM eval_cycles WHERE id = %s", (cycle_id,))
+        if not cycle:
+            raise ApiError("Cycle not found.", 404)
+        if cycle["status"] not in {"open", "closed"}:
+            raise ApiError("Results are available only for open or closed cycles.", 409)
+        rows = fetch_all(
+            cursor,
+            "SELECT tc.id, tc.name, c.name AS campus, p.user_id, u.position_role, "
+            "s.total_score, s.mean_score FROM cycle_targets ct "
+            "JOIN target_catalog tc ON tc.id = ct.target_id "
+            "LEFT JOIN campuses c ON c.id = tc.campus_id "
+            "LEFT JOIN participation p ON p.cycle_id = ct.cycle_id AND p.target_id = ct.target_id "
+            "LEFT JOIN users u ON u.id = p.user_id "
+            "LEFT JOIN evaluator_response_scores s ON s.score_link_token = p.submission_token "
+            "WHERE ct.cycle_id = %s ORDER BY tc.name, tc.id, p.id",
+            (cycle_id,),
+        )
+        offices = {}
+        evaluators = set()
+        for row in rows:
+            office = offices.setdefault(row["id"], {
+                "id": row["id"], "name": row["name"], "campus": row["campus"], "responses": [],
+            })
+            if row["user_id"] is not None:
+                evaluators.add(row["user_id"])
+                office["responses"].append({
+                    "role": row["position_role"] or "unspecified",
+                    "total": float(row["total_score"]) if row["total_score"] is not None else None,
+                    "mean": float(row["mean_score"]) if row["mean_score"] is not None else None,
+                })
+        comment_count = fetch_one(
+            cursor,
+            "SELECT COUNT(*) AS total FROM comments cm "
+            "JOIN cycle_targets ct ON ct.target_id = cm.target_id AND ct.cycle_id = cm.cycle_id "
+            "WHERE cm.cycle_id = %s",
+            (cycle_id,),
+        )["total"]
+        _audit(cursor, request_user(), "view", "results_summary", str(cycle_id))
+        conn.commit()
+        cursor.close()
+    return jsonify(cycle=cycle["name"], offices=list(offices.values()),
+                   evaluator_count=len(evaluators), comment_count=comment_count)

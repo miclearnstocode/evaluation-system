@@ -3,6 +3,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { apiFetch } from "../../lib/api";
 import { getTargetLocationLabel, TARGET_TYPE_LABELS, type TargetType } from "../../lib/targets";
+import CycleReport from "./cycle-report";
+import ReviewPageHeader from "../../components/review-page-header";
 
 type Cycle = { id: number; name: string; status: string; target_ids: number[] };
 type Target = { id: number; name: string; target_type: TargetType; campus_name: string | null; is_central: boolean | number };
@@ -35,9 +37,12 @@ type Results = {
   individual_responses?: IndividualResponse[];
 };
 
+const filterClassName = "mt-1.5 block w-full min-w-0 rounded-xl border border-slate-300 bg-white px-3.5 py-2.5 text-sm text-slate-900 outline-none focus:border-teal-600 focus:ring-4 focus:ring-teal-600/10 disabled:bg-slate-100";
+
 export default function SuperAdminResultsPage() {
   const [cycles, setCycles] = useState<Cycle[]>([]);
   const [targets, setTargets] = useState<Target[]>([]);
+  const [view, setView] = useState<"summary" | "office">("summary");
   const [cycleId, setCycleId] = useState("");
   const [targetId, setTargetId] = useState("");
   const [results, setResults] = useState<Results | null>(null);
@@ -79,14 +84,17 @@ export default function SuperAdminResultsPage() {
   );
 
   useEffect(() => {
-    if (!cycleId || !targetId) return;
+    if (view !== "office" || !cycleId || !targetId) return;
     let active = true;
     const loadResults = (initialLoad = false) => {
       apiFetch<Results>(
         `/api/admin/results?cycle_id=${encodeURIComponent(cycleId)}&target_id=${encodeURIComponent(targetId)}`,
       )
         .then((data) => {
-          if (active) setResults(data);
+          if (active) {
+            setResults(data);
+            setError("");
+          }
         })
         .catch((requestError: Error) => {
           if (active) {
@@ -106,17 +114,35 @@ export default function SuperAdminResultsPage() {
       active = false;
       if (refreshTimer !== undefined) window.clearInterval(refreshTimer);
     };
-  }, [cycleId, targetId, selectedCycle?.status]);
+  }, [cycleId, targetId, selectedCycle?.status, view]);
 
   return (
-    <div className="space-y-6">
-      <div>
-        <p className="text-sm font-medium text-teal-800">Evaluation outcomes</p>
-        <h1 className="mt-1 text-3xl font-bold tracking-tight text-[#1F3A5F]">Results</h1>
-      </div>
+    <div className="mx-auto max-w-7xl space-y-7">
+      <ReviewPageHeader title="Results" description="Review results across the cycle or explore the scores for one office." />
 
-      <div className="grid gap-4 rounded-xl border border-slate-200 bg-white p-5 shadow-sm sm:grid-cols-2">
-        <label className="text-sm font-medium text-slate-700">
+      {cycles.length > 0 && (
+        <div role="group" aria-label="Results view" className="inline-flex flex-wrap gap-1 rounded-xl border border-slate-200 bg-slate-100 p-1">
+          {(["summary", "office"] as const).map(option => (
+            <button
+              key={option}
+              type="button"
+              aria-pressed={view === option}
+              className={`rounded-lg px-4 py-2 text-sm font-semibold focus-visible:outline-2 focus-visible:outline-teal-600 ${view === option ? "bg-white text-teal-900 shadow-sm" : "text-slate-700 hover:bg-white/60"}`}
+              onClick={() => {
+                if (view === option) return;
+                setView(option);
+                setError("");
+                setLoadingResults(option === "office" && Boolean(targetId) && !results);
+              }}
+            >
+              {option === "summary" ? "Cycle summary" : "Office details"}
+            </button>
+          ))}
+        </div>
+      )}
+
+      <section aria-label="Result filters" className="grid gap-4 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm sm:grid-cols-2 sm:p-6">
+        <label className="min-w-0 text-sm font-semibold text-slate-700">
           Evaluation cycle
           <select
             value={cycleId}
@@ -131,145 +157,175 @@ export default function SuperAdminResultsPage() {
               setError("");
             }}
             disabled={loadingOptions}
-            className="mt-1.5 block w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5"
+            className={filterClassName}
           >
             <option value="">Select a cycle</option>
             {cycles.map((cycle) => <option key={cycle.id} value={cycle.id}>{cycle.name}</option>)}
           </select>
         </label>
-        <label className="text-sm font-medium text-slate-700">
-          Evaluation target
-          <select
-            value={targetId}
-            onChange={(event) => {
-              setTargetId(event.target.value);
-              setResults(null);
-              setLoadingResults(Boolean(event.target.value));
-              setError("");
-            }}
-            disabled={!availableTargets.length}
-            className="mt-1.5 block w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5"
-          >
-            <option value="">Select a target</option>
-            {availableTargets.map((target) => (
-              <option key={target.id} value={target.id}>
-                {TARGET_TYPE_LABELS[target.target_type]}: {target.name} — {getTargetLocationLabel(target.campus_name, Boolean(target.is_central))}
-              </option>
-            ))}
-          </select>
-        </label>
-      </div>
+        {view === "office" && (
+          <label className="min-w-0 text-sm font-semibold text-slate-700">
+            Office or evaluation target
+            <select
+              value={targetId}
+              onChange={(event) => {
+                setTargetId(event.target.value);
+                setResults(null);
+                setLoadingResults(Boolean(event.target.value));
+                setError("");
+              }}
+              disabled={!availableTargets.length}
+              className={filterClassName}
+            >
+              <option value="">Select a target</option>
+              {availableTargets.map((target) => (
+                <option key={target.id} value={target.id}>
+                  {TARGET_TYPE_LABELS[target.target_type]}: {target.name} — {getTargetLocationLabel(target.campus_name, Boolean(target.is_central))}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
+      </section>
 
-      {error && <p role="alert" className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</p>}
-      {loadingResults && <p role="status" className="text-sm text-slate-500">Loading results…</p>}
+      {cycleId && (
+        <div hidden={view !== "summary"}>
+          <CycleReport key={cycleId} cycleId={cycleId} />
+        </div>
+      )}
+      {error && <p role="alert" className="rounded-2xl border border-red-200 bg-red-50 px-5 py-4 text-sm text-red-800">{error}</p>}
+      {(loadingOptions || (view === "office" && loadingResults)) && <p role="status" className="rounded-2xl border border-slate-200 bg-white p-5 text-sm text-slate-600">Loading results…</p>}
       {!loadingOptions && !cycles.length && !error && (
         <p className="rounded-lg border border-slate-200 bg-white px-5 py-6 text-sm text-slate-600">
           Results become available when an evaluation cycle is open.
         </p>
       )}
-      {!loadingResults && results && !results.released && (
-        <div role="status" className="rounded-xl border border-amber-200 bg-amber-50 p-5">
-          <h2 className="font-semibold text-amber-950">Waiting for the first response</h2>
-          <p className="mt-1 text-sm text-amber-900">
-            Results for this target will appear as soon as the first evaluator submits.
+      <div hidden={view !== "office"} className="space-y-5">
+        {cycleId && !targetId && (
+          <p className="rounded-xl border border-slate-200 bg-white p-5 text-sm text-slate-600">
+            {availableTargets.length ? "Select an office to see its results." : "No offices are available for this cycle."}
           </p>
-        </div>
-      )}
-
-      {results?.released && (
-        <section className="space-y-5">
-          <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
-            <p className="text-sm text-slate-500">{results.cycle?.name}{selectedCycle ? ` · ${selectedCycle.status}` : ""}</p>
-            <h2 className="mt-1 text-xl font-semibold text-[#1F3A5F]">{results.target?.name}</h2>
-            <p className="mt-2 text-sm text-slate-600">
-              {results.response_count} total responses
+        )}
+        {!loadingResults && results && !results.released && (
+          <div role="status" className="rounded-xl border border-amber-200 bg-amber-50 p-5">
+            <h2 className="font-semibold text-amber-950">Waiting for the first response</h2>
+            <p className="mt-1 text-sm text-amber-900">
+              Results for this target will appear as soon as the first evaluator submits.
             </p>
           </div>
-          {results.questions?.map((question) => {
-            const max = Math.max(1, ...question.distribution.map((item) => item.count));
-            const mean = question.mean == null ? null : Number(question.mean);
-            return (
-              <article key={question.id} className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
-                <div className="flex flex-wrap items-start justify-between gap-4">
-                  <h3 className="font-semibold text-[#1F3A5F]">{question.text}</h3>
-                  {mean !== null && Number.isFinite(mean) && (
-                    <p className="shrink-0 text-right">
-                      <span className="block text-2xl font-bold text-teal-800">{mean.toFixed(2)}</span>
-                      <span className="text-xs text-slate-500">Average</span>
-                    </p>
-                  )}
-                </div>
-                {!!question.distribution.length && (
-                  <div className="mt-5 space-y-3">
-                    {question.distribution.map((item) => (
-                      <div key={item.value} className="grid grid-cols-[minmax(6rem,10rem)_1fr_2.5rem] items-center gap-3 text-sm">
-                        <span className="truncate text-slate-600" title={item.label}>{item.label}</span>
-                        <div className="h-3 overflow-hidden rounded-full bg-slate-100">
-                          <div className="h-full rounded-full bg-[#0F9D8A]" style={{ width: `${(item.count / max) * 100}%` }} />
-                        </div>
-                        <span className="text-right font-medium text-slate-700">{item.count}</span>
-                      </div>
-                    ))}
-                  </div>
-                )}
-                {question.type === "text" && (
-                  <p className="mt-4 border-t border-slate-100 pt-4 text-sm text-slate-500">
-                    Written responses are not shown in aggregate results to prevent accidental disclosure of evaluator identity.
-                  </p>
-                )}
-              </article>
-            );
-          })}
-          {!!results.individual_responses?.length && (
-            <section className="space-y-4">
+        )}
+
+        {results?.released && (
+          <section className="space-y-5">
+            <div className="flex flex-wrap items-center justify-between gap-4 rounded-2xl border border-teal-200 bg-white p-5 shadow-sm sm:p-6">
               <div>
-                <h2 className="text-xl font-semibold text-[#1F3A5F]">Individual submitted evaluations</h2>
-                <p className="mt-1 text-sm text-slate-500">
-                  Responses are shown without evaluator identity. Email addresses in written answers are redacted.
+                <p className="text-sm font-medium text-slate-600">
+                  {results.cycle?.name}{selectedCycle ? ` · ${selectedCycle.status}` : ""}
                 </p>
+                <h2 className="mt-1 text-2xl font-bold tracking-tight text-[#1F3A5F]">{results.target?.name}</h2>
+                {selectedCycle?.status === "open" && (
+                  <p className="mt-2 text-xs font-semibold text-teal-800">Live updates while the cycle is open</p>
+                )}
               </div>
-              {results.individual_responses.map((response, index) => (
-                <article key={index} className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
-                  <h3 className="font-semibold text-[#1F3A5F]">Anonymous response {index + 1}</h3>
-                  {response.total_score !== undefined && (
-                    <div className="mt-3 rounded-lg bg-teal-50 p-4 text-sm text-teal-950">
-                      <p className="font-semibold">
-                        Total: {response.total_score.toFixed(2)} points
-                        <span className="mx-2 text-teal-700">·</span>
-                        Mean per section: {response.mean_score?.toFixed(2) ?? "0.00"}
+              <dl className="rounded-xl bg-teal-50 px-5 py-3">
+                <dt className="text-xs font-semibold text-teal-800">Total responses</dt>
+                <dd className="mt-1 text-3xl font-bold text-teal-950 tabular-nums">{results.response_count}</dd>
+              </dl>
+            </div>
+            {results.questions?.map((question) => {
+              const max = Math.max(1, ...question.distribution.map((item) => item.count));
+              const mean = question.mean == null ? null : Number(question.mean);
+              return (
+                <article key={question.id} className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
+                  <div className="flex flex-wrap items-start justify-between gap-4">
+                    <h3 className="font-semibold text-[#1F3A5F]">{question.text}</h3>
+                    {mean !== null && Number.isFinite(mean) && (
+                      <p className="shrink-0 rounded-xl bg-teal-50 px-3 py-2 text-right">
+                        <span className="block text-2xl font-bold text-teal-800">{mean.toFixed(2)}</span>
+                        <span className="text-xs text-slate-500">Average</span>
                       </p>
-                      {!!response.section_scores?.length && (
-                        <ul className="mt-2 flex flex-wrap gap-x-5 gap-y-1 text-teal-900">
-                          {response.section_scores.map((section) => (
-                            <li key={section.section_id}>
-                              {section.title}: {section.score.toFixed(2)}
-                            </li>
-                          ))}
-                        </ul>
-                      )}
+                    )}
+                  </div>
+                  {!!question.distribution.length && (
+                    <div className="mt-5 space-y-3">
+                      {question.distribution.map((item) => (
+                        <div key={item.value} className="grid grid-cols-[minmax(5rem,1fr)_minmax(0,2fr)_2.25rem] items-center gap-3 text-sm">
+                          <span className="wrap-anywhere text-slate-700">{item.label}</span>
+                          <div aria-hidden="true" className="h-2 overflow-hidden rounded-full bg-slate-100">
+                            <div className="h-full rounded-full bg-teal-600" style={{ width: `${(item.count / max) * 100}%` }} />
+                          </div>
+                          <span className="text-right font-medium text-slate-700">{item.count}</span>
+                        </div>
+                      ))}
                     </div>
                   )}
-                  <dl className="mt-3 divide-y divide-slate-100">
-                    {response.answers.map((answer, answerIndex) => (
-                      <div key={`${answer.question}-${answerIndex}`} className="grid gap-1 py-3 sm:grid-cols-[minmax(12rem,1fr)_2fr] sm:gap-4">
-                        <dt className="text-sm font-medium text-slate-600">{answer.question}</dt>
-                        <dd className="whitespace-pre-wrap text-sm text-slate-800">
-                          {Array.isArray(answer.answer) ? answer.answer.join(", ") : answer.answer}
-                          {answer.score !== null && answer.score !== undefined && (
-                            <span className="mt-1 block text-xs font-medium text-teal-800">
-                              Score: {answer.score.toFixed(2)} points
-                            </span>
-                          )}
-                        </dd>
-                      </div>
-                    ))}
-                  </dl>
+                  {question.type === "text" && (
+                    <p className="mt-4 border-t border-slate-100 pt-4 text-sm text-slate-500">
+                      Find written responses by office on the Comments page.
+                    </p>
+                  )}
                 </article>
-              ))}
-            </section>
-          )}
-        </section>
-      )}
+              );
+            })}
+            {!!results.individual_responses?.length && (
+              <section className="space-y-4">
+                <div>
+                  <h2 className="text-xl font-semibold text-[#1F3A5F]">Individual submitted evaluations</h2>
+                  <p className="mt-1 text-sm text-slate-500">
+                    Responses are shown without evaluator identity. Email addresses in written answers are redacted.
+                  </p>
+                </div>
+                {results.individual_responses.map((response, index) => (
+                  <details key={index} className="group overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+                    <summary className="flex cursor-pointer list-none flex-wrap items-center justify-between gap-3 px-5 py-4 font-semibold text-[#1F3A5F] hover:bg-slate-50 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-teal-700 [&::-webkit-details-marker]:hidden">
+                      <span>Anonymous response {index + 1}</span>
+                      <span className="flex items-center gap-3 text-sm">
+                        {response.mean_score !== undefined && <span className="text-teal-800">Mean {response.mean_score.toFixed(2)}</span>}
+                        <span aria-hidden="true" className="transition-transform group-open:rotate-180">⌄</span>
+                      </span>
+                    </summary>
+                    <div className="border-t border-slate-100 px-5 pb-3">
+                      {response.total_score !== undefined && (
+                        <div className="mt-3 rounded-lg bg-teal-50 p-4 text-sm text-teal-950">
+                          <p className="font-semibold">
+                            Total: {response.total_score.toFixed(2)} points
+                            <span className="mx-2 text-teal-700">·</span>
+                            Mean per section: {response.mean_score?.toFixed(2) ?? "0.00"}
+                          </p>
+                          {!!response.section_scores?.length && (
+                            <ul className="mt-2 flex flex-wrap gap-x-5 gap-y-1 text-teal-900">
+                              {response.section_scores.map((section) => (
+                                <li key={section.section_id}>
+                                  {section.title}: {section.score.toFixed(2)}
+                                </li>
+                              ))}
+                            </ul>
+                          )}
+                        </div>
+                      )}
+                      <dl className="mt-3 divide-y divide-slate-100">
+                        {response.answers.map((answer, answerIndex) => (
+                          <div key={`${answer.question}-${answerIndex}`} className="grid gap-1 py-3 sm:grid-cols-[minmax(12rem,1fr)_2fr] sm:gap-4">
+                            <dt className="text-sm font-medium text-slate-600">{answer.question}</dt>
+                            <dd className="whitespace-pre-wrap text-sm text-slate-800">
+                              {Array.isArray(answer.answer) ? answer.answer.join(", ") : answer.answer}
+                              {answer.score !== null && answer.score !== undefined && (
+                                <span className="mt-1 block text-xs font-medium text-teal-800">
+                                  Score: {answer.score.toFixed(2)} points
+                                </span>
+                              )}
+                            </dd>
+                          </div>
+                        ))}
+                      </dl>
+                    </div>
+                  </details>
+                ))}
+              </section>
+            )}
+          </section>
+        )}
+      </div>
     </div>
   );
 }

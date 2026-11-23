@@ -27,12 +27,30 @@ const navigationGroups = [
   { label: "System", links: [["Audit Log", "/admin/audit-log"]] },
 ] as const;
 
-type AdminSession = { id: number; email: string; role: "admin" | "super_admin" | "evaluator" };
+const superAdminNavigationGroups = [
+  {
+    label: "Evaluation review",
+    links: [
+      ["Live Office Standing", "/super_admin/standing"],
+      ["Results", "/super_admin/results"],
+      ["Submissions", "/super_admin/submissions"],
+      ["Comments", "/super_admin/comments"],
+    ],
+  },
+] as const;
 
-function AdminNavigation({ currentPath, onNavigate }: { currentPath: string; onNavigate?: () => void }) {
+type AdminSession = { id: number; email: string; role: "admin" | "super_admin" | "evaluator" };
+type AdminAudience = "admin" | "super_admin";
+
+function AdminNavigation({ currentPath, audience, onNavigate }: {
+  currentPath: string;
+  audience: AdminAudience;
+  onNavigate?: () => void;
+}) {
+  const groups = audience === "super_admin" ? superAdminNavigationGroups : navigationGroups;
   return (
-    <nav aria-label="Admin navigation" className="space-y-5 p-3">
-      {navigationGroups.map((group) => (
+    <nav aria-label={audience === "super_admin" ? "Super Admin navigation" : "Admin navigation"} className="space-y-5 p-3">
+      {groups.map((group) => (
         <div key={group.label}>
           <p className="px-3 text-[11px] font-semibold tracking-[0.12em] text-slate-400 uppercase">{group.label}</p>
           <ul className="mt-1 space-y-0.5">
@@ -62,7 +80,7 @@ function AdminNavigation({ currentPath, onNavigate }: { currentPath: string; onN
   );
 }
 
-export default function AdminShell({ children }: { children: ReactNode }) {
+export default function AdminShell({ children, audience = "admin" }: { children: ReactNode; audience?: AdminAudience }) {
   const pathname = usePathname();
   const currentPath = pathname.replace(/\/+$/, "") || "/";
   const router = useRouter();
@@ -73,14 +91,16 @@ export default function AdminShell({ children }: { children: ReactNode }) {
   const [mobileMenuPath, setMobileMenuPath] = useState<string | null>(null);
   const menuButton = useRef<HTMLButtonElement>(null);
   const mobileMenuOpen = mobileMenuPath === currentPath;
+  const consoleTitle = audience === "super_admin" ? "Super Admin Console" : "Admin Console";
+  const homeHref = audience === "super_admin" ? "/super_admin/standing" : "/admin/dashboard";
 
   useEffect(() => {
     let active = true;
     apiFetch<AdminSession>("/api/auth/me")
       .then((session) => {
         if (!active) return;
-        if (session.role !== "admin") {
-          router.replace(session.role === "super_admin" ? "/super_admin/standing" : "/");
+        if (session.role !== audience) {
+          router.replace(session.role === "super_admin" ? "/super_admin/standing" : session.role === "admin" ? "/admin/dashboard" : "/");
           return;
         }
         setUser(session);
@@ -99,7 +119,7 @@ export default function AdminShell({ children }: { children: ReactNode }) {
     return () => {
       active = false;
     };
-  }, [router]);
+  }, [audience, router]);
 
   async function logout() {
     setSessionError("");
@@ -115,7 +135,7 @@ export default function AdminShell({ children }: { children: ReactNode }) {
     }
   }
 
-  if (checkingSession || !user) {
+  if (checkingSession || user?.role !== audience) {
     return (
       <main className="flex min-h-screen items-center justify-center bg-linear-to-br from-slate-100 via-white to-teal-50 px-5">
         <div className="w-full max-w-sm rounded-3xl border border-slate-200 bg-white p-8 text-center shadow-lg shadow-slate-900/5">
@@ -133,7 +153,7 @@ export default function AdminShell({ children }: { children: ReactNode }) {
             </>
           ) : (
             <p role="status" className="text-sm text-slate-600">
-              Checking administrator access…
+              {audience === "super_admin" ? "Checking Super Admin access…" : "Checking administrator access…"}
             </p>
           )}
         </div>
@@ -148,12 +168,12 @@ export default function AdminShell({ children }: { children: ReactNode }) {
       </a>
       <div className="flex min-h-screen flex-col md:flex-row">
         <aside className="hidden shrink-0 bg-linear-to-b from-[#162B46] to-[#1F3A5F] text-white md:sticky md:top-0 md:flex md:h-dvh md:w-56 md:flex-col md:self-start lg:w-60">
-          <Link href="/admin/dashboard" className="flex items-center gap-3 border-b border-white/10 px-4 py-5 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-teal-200">
+          <Link href={homeHref} className="flex items-center gap-3 border-b border-white/10 px-4 py-5 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-teal-200">
             <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl border border-teal-300/25 bg-teal-300/15 text-sm font-bold text-teal-100" aria-hidden="true">CES</span>
             <span className="text-sm font-semibold leading-tight">CAPSU Evaluation Portal</span>
           </Link>
           <div className="min-h-0 flex-1 overflow-y-auto py-2">
-            <AdminNavigation currentPath={currentPath} />
+            <AdminNavigation currentPath={currentPath} audience={audience} />
           </div>
         </aside>
 
@@ -192,11 +212,11 @@ export default function AdminShell({ children }: { children: ReactNode }) {
                   hidden={!mobileMenuOpen}
                   className="absolute inset-x-3 top-full mt-2 max-h-[calc(100dvh_-_5.5rem)] overflow-y-auto rounded-2xl border border-slate-700 bg-[#162B46] text-white shadow-xl shadow-slate-900/25 md:hidden"
                 >
-                  <AdminNavigation currentPath={currentPath} onNavigate={() => setMobileMenuPath(null)} />
+                  <AdminNavigation currentPath={currentPath} audience={audience} onNavigate={() => setMobileMenuPath(null)} />
                 </div>
                 <div className="min-w-0">
                   <p className="truncate text-xs font-medium text-slate-500 md:hidden">CAPSU Evaluation Portal</p>
-                  <p className="truncate text-sm font-bold text-[#1F3A5F] sm:text-base">Admin Console</p>
+                  <p className="truncate text-sm font-bold text-[#1F3A5F] sm:text-base">{consoleTitle}</p>
                 </div>
               </div>
               <div className="flex min-w-0 shrink-0 items-center gap-3">

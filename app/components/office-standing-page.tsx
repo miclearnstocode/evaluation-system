@@ -3,10 +3,11 @@
 import { useEffect, useRef, useState } from "react";
 import { apiFetch } from "../lib/api";
 import { getTargetLocationLabel, TARGET_TYPE_LABELS, type TargetType } from "../lib/targets";
+import ReviewPageHeader from "./review-page-header";
 
 type Cycle = { id: number; name: string; status: "open" | "closed" };
 type SectionMean = { section_id: number; title: string; mean_score: number | null };
-type EvaluatorMean = { email: string; mean_score: number };
+type EvaluatorMean = { evaluator_number: number; mean_score: number };
 type OfficeStanding = {
   target_id: number;
   target_name: string;
@@ -73,10 +74,8 @@ export default function OfficeStandingPage({
 
   useEffect(() => {
     if (!cycleId) return;
-    if (!initialCycleHandled.current) {
-      initialCycleHandled.current = true;
-      return;
-    }
+    const isInitialCycle = !initialCycleHandled.current;
+    initialCycleHandled.current = true;
 
     let active = true;
     const loadStanding = () => {
@@ -104,7 +103,7 @@ export default function OfficeStandingPage({
           if (active) setLoading(false);
         });
     };
-    loadStanding();
+    if (!isInitialCycle) loadStanding();
     const refreshTimer = selectedCycle?.status === "open"
       ? window.setInterval(loadStanding, 10000)
       : undefined;
@@ -117,47 +116,41 @@ export default function OfficeStandingPage({
   const selectedTarget = items.find((item) => item.target_id === selectedTargetId);
 
   return (
-    <div className="space-y-6">
-      <div>
-        <p className="text-sm font-medium text-teal-800">Evaluation outcomes</p>
-        <h1 className="mt-1 text-3xl font-bold tracking-tight text-[#1F3A5F]">Live Office Standing</h1>
-        <p className="mt-2 text-sm text-slate-600">
-          Office mean is the average of submitted evaluators’ mean scores across all survey sections.
-        </p>
-        {selectedCycle?.status === "open" && (
-          <p className="mt-1 text-xs text-slate-500">Open-cycle scores refresh every 10 seconds.</p>
-        )}
-      </div>
-
-      <label className="block max-w-lg text-sm font-medium text-slate-700">
-        Evaluation cycle
-        <select
-          value={cycleId}
-          onChange={(event) => {
-            setCycleId(event.target.value);
-            setItems([]);
-            setSelectedTargetId(null);
-            setLoading(Boolean(event.target.value));
-            setError("");
-          }}
-          disabled={!cycles.length}
-          className="mt-1.5 block w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5"
-        >
-          <option value="">Select a cycle</option>
-          {cycles.map((cycle) => (
-            <option key={cycle.id} value={cycle.id}>
-              {cycle.name} ({cycle.status})
-            </option>
-          ))}
-        </select>
-      </label>
+    <div className="mx-auto max-w-7xl space-y-7">
+      <ReviewPageHeader
+        title="Live Office Standing"
+        description="Office means average the scores of submitted evaluations across survey sections."
+      >
+        <label className="block w-full min-w-0 rounded-2xl border border-white/25 bg-white/10 p-4 text-sm font-semibold text-teal-50 sm:max-w-xs">
+          Evaluation cycle
+          <select
+            value={cycleId}
+            onChange={(event) => {
+              setCycleId(event.target.value);
+              setItems([]);
+              setSelectedTargetId(null);
+              setLoading(Boolean(event.target.value));
+              setError("");
+            }}
+            disabled={!cycles.length}
+            className="mt-2 block w-full rounded-xl bg-white px-3.5 py-2.5 text-sm font-medium text-slate-900 outline-none focus-visible:ring-4 focus-visible:ring-teal-200/50 disabled:opacity-70"
+          >
+            <option value="">Select a cycle</option>
+            {cycles.map((cycle) => (
+              <option key={cycle.id} value={cycle.id}>
+                {cycle.name} ({cycle.status})
+              </option>
+            ))}
+          </select>
+        </label>
+      </ReviewPageHeader>
 
       {error && (
-        <p role="alert" className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+        <p role="alert" className="rounded-2xl border border-red-200 bg-red-50 px-5 py-4 text-sm text-red-800">
           {error}
         </p>
       )}
-      {loading && <p role="status" className="text-sm text-slate-500">Loading office scores…</p>}
+      {loading && <p role="status" className="rounded-2xl border border-slate-200 bg-white p-5 text-sm text-slate-600">Loading office scores…</p>}
       {!loading && !error && !cycles.length && (
         <p className="rounded-xl border border-slate-200 bg-white px-5 py-6 text-sm text-slate-600">
           No open or completed evaluation cycles are available.
@@ -170,7 +163,15 @@ export default function OfficeStandingPage({
       )}
 
       {!!items.length && (
-        <section className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+        <section aria-labelledby="office-scores-title" className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 px-5 py-4">
+            <h2 id="office-scores-title" className="text-xl font-bold tracking-tight text-[#1F3A5F]">Office scores</h2>
+            {selectedCycle?.status === "open" && (
+              <p className="rounded-full bg-teal-50 px-3 py-1 text-xs font-semibold text-teal-800">
+                Refreshes every 10 seconds
+              </p>
+            )}
+          </div>
           <div className="max-h-128 overflow-auto">
             <table className="w-full min-w-152 text-left text-sm">
               <thead>
@@ -207,10 +208,12 @@ export default function OfficeStandingPage({
                       <td className="px-5 py-4 text-right">
                         <button
                           type="button"
+                          aria-pressed={selectedTargetId === item.target_id}
+                          aria-controls="office-score-details"
                           onClick={() => setSelectedTargetId(item.target_id)}
-                          className="rounded-lg px-3 py-2 text-xs font-semibold text-teal-800 hover:bg-teal-50"
+                          className="rounded-lg border border-teal-200 bg-white px-3 py-2 text-xs font-semibold text-teal-800 hover:bg-teal-100 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-teal-700"
                         >
-                          View evaluator means
+                          View details
                         </button>
                       </td>
                     )}
@@ -223,8 +226,8 @@ export default function OfficeStandingPage({
       )}
 
       {role === "super_admin" && selectedTarget && (
-        <section className="grid gap-5 lg:grid-cols-2">
-          <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+        <section id="office-score-details" aria-label={`Score details for ${selectedTarget.target_name}`} className="grid gap-5 lg:grid-cols-2">
+          <div className="min-w-0 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
             <div className="border-b border-slate-200 px-5 py-4">
               <h2 className="font-semibold text-[#1F3A5F]">Mean score by section</h2>
               <p className="mt-1 text-sm text-slate-500">{selectedTarget.target_name}</p>
@@ -242,7 +245,7 @@ export default function OfficeStandingPage({
             </div>
           </div>
 
-          <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+          <div className="min-w-0 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
             <div className="border-b border-slate-200 px-5 py-4">
               <h2 className="font-semibold text-[#1F3A5F]">Evaluator mean scores</h2>
               <p className="mt-1 text-sm text-slate-500">{selectedTarget.target_name}</p>
@@ -251,14 +254,14 @@ export default function OfficeStandingPage({
               <table className="w-full text-left text-sm">
                 <thead>
                   <tr className="sticky top-0 bg-slate-50 text-[#1F3A5F]">
-                    <th scope="col" className="px-5 py-3 font-semibold">Evaluator email</th>
+                    <th scope="col" className="px-5 py-3 font-semibold">Evaluator</th>
                     <th scope="col" className="px-5 py-3 text-right font-semibold">Mean score</th>
                   </tr>
                 </thead>
                 <tbody>
                   {selectedTarget.evaluator_means?.map((evaluator, index) => (
-                    <tr key={`${evaluator.email}-${index}`} className="border-t border-slate-100">
-                      <td className="px-5 py-3 text-slate-700">{evaluator.email}</td>
+                    <tr key={evaluator.evaluator_number ?? index + 1} className="border-t border-slate-100">
+                      <td className="px-5 py-3 text-slate-700">Evaluator {evaluator.evaluator_number ?? index + 1}</td>
                       <td className="px-5 py-3 text-right font-semibold text-teal-800">
                         {scoreLabel(evaluator.mean_score)}
                       </td>

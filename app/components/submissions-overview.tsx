@@ -1,8 +1,9 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { apiFetch } from "../lib/api";
 import { getTargetLocationLabel, TARGET_TYPE_LABELS, type TargetType } from "../lib/targets";
+import ReviewPageHeader from "./review-page-header";
 
 type Cycle = { id: number; name: string; status: string; target_ids: number[] };
 type Target = {
@@ -10,24 +11,31 @@ type Target = {
   name: string;
   target_type: TargetType;
   campus_name: string | null;
+  office_head_name?: string | null;
   is_central: boolean | number;
 };
 type EvaluatorData = {
-  user_id: number;
-  first_name: string | null;
-  last_name: string | null;
-  evaluator_email: string;
-  submission_token: string | null;
-  submitted_at: string | null;
+  evaluator_number?: number;
+  user_id?: number;
+  first_name?: string | null;
+  last_name?: string | null;
+  evaluator_email?: string;
+  submitted?: boolean;
+  submission_token?: string | null;
   total_score?: number | string | null;
   mean_score: number | string | null;
 };
-type SubmissionComment = {
-  id: number;
-  question: string;
-  body: string;
-  status: "pending" | "approved" | "hidden";
-};
+type RosterEntry = { evaluator: EvaluatorData; id: number; name: string; marker: string };
+
+function targetSubtitle(target: Target, isSuperAdmin: boolean) {
+  return isSuperAdmin
+    ? target.office_head_name?.trim()
+    : getTargetLocationLabel(target.campus_name, Boolean(target.is_central));
+}
+
+function hasSubmission(evaluator: EvaluatorData) {
+  return evaluator.submitted ?? Boolean(evaluator.submission_token);
+}
 
 function getAvatarColor(name: string) {
   const colors = ["bg-blue-100 text-blue-600", "bg-teal-100 text-teal-600", "bg-indigo-100 text-indigo-600", "bg-purple-100 text-purple-600"];
@@ -36,7 +44,7 @@ function getAvatarColor(name: string) {
 }
 
 function evaluatorName(evaluator: EvaluatorData) {
-  return [evaluator.first_name, evaluator.last_name].filter(Boolean).join(" ").trim() || evaluator.evaluator_email;
+  return [evaluator.first_name, evaluator.last_name].filter(Boolean).join(" ").trim() || evaluator.evaluator_email || "Evaluator";
 }
 
 function evaluatorInitials(evaluator: EvaluatorData) {
@@ -54,7 +62,7 @@ function EvaluatorDiagram({
   evaluators,
   officeMean,
 }: {
-  evaluators: EvaluatorData[];
+  evaluators: RosterEntry[];
   officeMean: number | null;
 }) {
   const perRing = 24;
@@ -63,13 +71,13 @@ function EvaluatorDiagram({
   const ringCount = Math.ceil(evaluators.length / perRing);
   const outerRadius = innerRadius + (ringCount - 1) * ringSpacing;
   const center = outerRadius + 24;
-  const nodes = evaluators.map((evaluator, index) => {
+  const nodes = evaluators.map((entry, index) => {
     const ring = Math.floor(index / perRing);
     const ringSize = Math.min(perRing, evaluators.length - ring * perRing);
     const angle = ((index % perRing) / ringSize) * Math.PI * 2 - Math.PI / 2 + ring * 0.13;
     const radius = innerRadius + ring * ringSpacing;
     return {
-      evaluator,
+      ...entry,
       x: center + Math.cos(angle) * radius,
       y: center + Math.sin(angle) * radius,
     };
@@ -97,8 +105,8 @@ function EvaluatorDiagram({
         className="mx-auto mt-4 block w-full max-w-sm"
       >
         <g aria-hidden="true">
-          {nodes.map(({ evaluator, x, y }) => (
-            <line key={evaluator.user_id} x1={center} y1={center} x2={x} y2={y} className="stroke-slate-300" strokeDasharray="3 4" />
+          {nodes.map(({ id, x, y }) => (
+            <line key={id} x1={center} y1={center} x2={x} y2={y} className="stroke-slate-300" strokeDasharray="3 4" />
           ))}
           <circle cx={center} cy={center} r={55} className="fill-teal-50 stroke-teal-200" strokeWidth={2} />
           <text x={center} y={center - 8} textAnchor="middle" className="fill-teal-800 text-[11px] font-semibold">
@@ -108,11 +116,11 @@ function EvaluatorDiagram({
             {scoreLabel(officeMean)}
           </text>
         </g>
-        {nodes.map(({ evaluator, x, y }) => {
-          const submitted = Boolean(evaluator.submission_token);
-          const label = `${evaluatorName(evaluator)} · ${submitted ? "Submitted" : "Pending"}`;
+        {nodes.map(({ evaluator, id, name, marker, x, y }) => {
+          const submitted = hasSubmission(evaluator);
+          const label = `${name} · ${submitted ? "Submitted" : "Pending"}`;
           return (
-            <a key={evaluator.user_id} href={`#review-evaluator-${evaluator.user_id}`} aria-label={label} className="group">
+            <a key={id} href={`#review-evaluator-${id}`} aria-label={label} className="group">
               <title>{label}</title>
               <circle
                 cx={x}
@@ -123,7 +131,7 @@ function EvaluatorDiagram({
                   : "fill-amber-100 stroke-amber-600 group-hover:fill-amber-200 group-focus-visible:stroke-[3]"}
               />
               <text x={x} y={y} textAnchor="middle" dominantBaseline="central" className="fill-slate-900 text-[9px] font-bold uppercase">
-                {evaluatorInitials(evaluator)}
+                {marker}
               </text>
             </a>
           );
@@ -147,12 +155,6 @@ export function SubmissionsOverview({ audience = "admin" }: { audience?: "admin"
   const [loadingOptions, setLoadingOptions] = useState(true);
   const [deletingToken, setDeletingToken] = useState("");
   const [error, setError] = useState("");
-  const [reviewEvaluator, setReviewEvaluator] = useState<EvaluatorData | null>(null);
-  const [reviewComments, setReviewComments] = useState<SubmissionComment[]>([]);
-  const [loadingComments, setLoadingComments] = useState(false);
-  const [reviewError, setReviewError] = useState("");
-  const reviewRequestId = useRef(0);
-
   useEffect(() => {
     let active = true;
     const optionsRequest = isSuperAdmin
@@ -198,7 +200,7 @@ export function SubmissionsOverview({ audience = "admin" }: { audience?: "admin"
     )
       .then((data) => {
         if (active) {
-          const sorted = [...data.items].sort((a, b) => (b.submission_token ? 1 : 0) - (a.submission_token ? 1 : 0));
+          const sorted = [...data.items].sort((a, b) => Number(hasSubmission(b)) - Number(hasSubmission(a)));
           setEvaluators(sorted);
           setOfficeMean(data.office_mean);
         }
@@ -208,41 +210,11 @@ export function SubmissionsOverview({ audience = "admin" }: { audience?: "admin"
     return () => { active = false; };
   }, [cycleId, isSuperAdmin, submissionRequestKey, targetId]);
 
-  function closeCommentReview() {
-    reviewRequestId.current += 1;
-    setReviewEvaluator(null);
-    setReviewComments([]);
-    setReviewError("");
-    setLoadingComments(false);
-  }
-
   function resetSelection() {
-    closeCommentReview();
     setError("");
     setEvaluators([]);
     setOfficeMean(null);
     setLoadedSubmissionKey("");
-  }
-
-  async function reviewCommentsFor(evaluator: EvaluatorData) {
-    if (!isSuperAdmin || !evaluator.submission_token) return;
-    const requestId = ++reviewRequestId.current;
-    setReviewEvaluator(evaluator);
-    setReviewComments([]);
-    setReviewError("");
-    setLoadingComments(true);
-    try {
-      const data = await apiFetch<{ items: SubmissionComment[] }>(
-        `/api/admin/super-admin/submissions/${encodeURIComponent(evaluator.submission_token)}/comments`,
-      );
-      if (requestId === reviewRequestId.current) setReviewComments(data.items);
-    } catch (requestError) {
-      if (requestId === reviewRequestId.current) {
-        setReviewError(requestError instanceof Error ? requestError.message : "Comments could not be loaded.");
-      }
-    } finally {
-      if (requestId === reviewRequestId.current) setLoadingComments(false);
-    }
   }
 
   async function removeSubmission(evaluator: EvaluatorData) {
@@ -258,7 +230,7 @@ export function SubmissionsOverview({ audience = "admin" }: { audience?: "admin"
       });
       
       const nextEvaluators = evaluators.map(ev => 
-        ev.user_id === evaluator.user_id ? { ...ev, submission_token: null, mean_score: null, submitted_at: null } : ev
+        ev.user_id === evaluator.user_id ? { ...ev, submission_token: null, mean_score: null } : ev
       );
       setEvaluators(nextEvaluators);
       
@@ -280,46 +252,45 @@ export function SubmissionsOverview({ audience = "admin" }: { audience?: "admin"
   }
 
   const currentTarget = availableTargets.find((target) => String(target.id) === targetId);
-  const submittedCount = evaluators.filter((evaluator) => evaluator.submission_token).length;
+  const currentTargetSubtitle = currentTarget && targetSubtitle(currentTarget, isSuperAdmin);
+  const roster: RosterEntry[] = evaluators.map((evaluator, index) => {
+    const number = evaluator.evaluator_number ?? index + 1;
+    return isSuperAdmin
+      ? { evaluator, id: number, name: `Evaluator ${number}`, marker: String(number) }
+      : { evaluator, id: evaluator.user_id ?? number, name: evaluatorName(evaluator), marker: evaluatorInitials(evaluator) };
+  });
+  const submittedCount = evaluators.filter(hasSubmission).length;
 
   return (
     <div className="mx-auto max-w-7xl space-y-7">
-      <header className="relative isolate overflow-hidden rounded-3xl bg-linear-to-br from-[#162B46] via-[#1F3A5F] to-[#126B64] px-6 py-7 text-white shadow-lg shadow-slate-900/10 sm:px-9 sm:py-9">
-        <div aria-hidden="true" className="pointer-events-none absolute inset-y-0 right-0 -z-10 w-2/3 bg-[linear-gradient(to_right,#ffffff14_1px,transparent_1px),linear-gradient(to_bottom,#ffffff14_1px,transparent_1px)] bg-size-[28px_28px] mask-[linear-gradient(to_left,black,transparent_85%)]" />
-        <div className="flex flex-wrap items-center justify-between gap-6">
-          <div>
-            <h1 className="text-4xl font-bold tracking-tight sm:text-5xl">
-              {isSuperAdmin ? "Submission Review" : "Review Submissions"}
-            </h1>
-            <p className="mt-3 max-w-lg text-sm leading-6 text-slate-100">
-              {isSuperAdmin
-                ? "Review submission status, individual scores, and written comments by office."
-                : "Review evaluator submission status and office mean scores by evaluation cycle."}
-            </p>
-          </div>
-          <label className="block w-full min-w-0 rounded-2xl border border-white/25 bg-white/10 p-4 text-sm font-semibold text-teal-50 sm:max-w-xs">
-            Evaluation cycle
-            <select
-              value={cycleId}
-              disabled={loadingOptions || cycles.length === 0 || Boolean(deletingToken)}
-              onChange={(event) => {
-                const nextCycleId = event.target.value;
-                const nextCycle = cycles.find((cycle) => String(cycle.id) === nextCycleId);
-                const nextTarget = targets.find((target) => nextCycle?.target_ids.includes(target.id));
-                resetSelection();
-                setCycleId(nextCycleId);
-                setTargetId(nextTarget ? String(nextTarget.id) : "");
-              }}
-              className="mt-2 block w-full rounded-xl bg-white px-3.5 py-2.5 text-sm font-medium text-slate-900 outline-none focus-visible:ring-4 focus-visible:ring-teal-200/50 disabled:opacity-70"
-            >
-              <option value="">{loadingOptions ? "Loading cycles…" : "Select a cycle"}</option>
-              {cycles.map((cycle) => (
-                <option key={cycle.id} value={cycle.id}>{cycle.name} ({cycle.status})</option>
-              ))}
-            </select>
-          </label>
-        </div>
-      </header>
+      <ReviewPageHeader
+        title={isSuperAdmin ? "Submission Review" : "Review Submissions"}
+        description={isSuperAdmin
+          ? "Review submission status and individual scores by office."
+          : "Review evaluator submission status and office mean scores by evaluation cycle."}
+      >
+        <label className="block w-full min-w-0 rounded-2xl border border-white/25 bg-white/10 p-4 text-sm font-semibold text-teal-50 sm:max-w-xs">
+          Evaluation cycle
+          <select
+            value={cycleId}
+            disabled={loadingOptions || cycles.length === 0 || Boolean(deletingToken)}
+            onChange={(event) => {
+              const nextCycleId = event.target.value;
+              const nextCycle = cycles.find((cycle) => String(cycle.id) === nextCycleId);
+              const nextTarget = targets.find((target) => nextCycle?.target_ids.includes(target.id));
+              resetSelection();
+              setCycleId(nextCycleId);
+              setTargetId(nextTarget ? String(nextTarget.id) : "");
+            }}
+            className="mt-2 block w-full rounded-xl bg-white px-3.5 py-2.5 text-sm font-medium text-slate-900 outline-none focus-visible:ring-4 focus-visible:ring-teal-200/50 disabled:opacity-70"
+          >
+            <option value="">{loadingOptions ? "Loading cycles…" : "Select a cycle"}</option>
+            {cycles.map((cycle) => (
+              <option key={cycle.id} value={cycle.id}>{cycle.name} ({cycle.status})</option>
+            ))}
+          </select>
+        </label>
+      </ReviewPageHeader>
 
       {error && (
         <p role="alert" className="rounded-2xl border border-red-200 bg-red-50 px-5 py-4 text-sm text-red-800">{error}</p>
@@ -358,7 +329,7 @@ export function SubmissionsOverview({ audience = "admin" }: { audience?: "admin"
                     >
                       <span className="block text-sm font-semibold">{target.name}</span>
                       <span className="mt-1 block text-xs text-slate-600">
-                        {TARGET_TYPE_LABELS[target.target_type]} · {getTargetLocationLabel(target.campus_name, Boolean(target.is_central))}
+                        {[TARGET_TYPE_LABELS[target.target_type], targetSubtitle(target, isSuperAdmin)].filter(Boolean).join(" \u00b7 ")}
                       </span>
                     </button>
                   </li>
@@ -373,9 +344,9 @@ export function SubmissionsOverview({ audience = "admin" }: { audience?: "admin"
             <h2 id="review-office-title" className="text-xl font-bold tracking-tight text-[#1F3A5F]">
               {currentTarget?.name ?? "Office review"}
             </h2>
-            {currentTarget && (
+            {currentTargetSubtitle && (
               <p className="mt-1 text-sm text-slate-600">
-                {getTargetLocationLabel(currentTarget.campus_name, Boolean(currentTarget.is_central))}
+                {currentTargetSubtitle}
               </p>
             )}
           </div>
@@ -405,20 +376,19 @@ export function SubmissionsOverview({ audience = "admin" }: { audience?: "admin"
                 </div>
               </dl>
 
-              {evaluators.length > 0 && <EvaluatorDiagram evaluators={evaluators} officeMean={officeMean} />}
+              {evaluators.length > 0 && <EvaluatorDiagram evaluators={roster} officeMean={officeMean} />}
 
               {evaluators.length === 0 ? (
                 <p className="px-5 py-8 text-sm text-slate-600 sm:px-6">No evaluators are listed for this target.</p>
               ) : (
                 <ul aria-label="Evaluators" className="divide-y divide-slate-100">
-                  {evaluators.map((evaluator) => {
-                    const name = evaluatorName(evaluator);
-                    const submitted = Boolean(evaluator.submission_token);
+                  {roster.map(({ evaluator, id, name, marker }) => {
+                    const submitted = hasSubmission(evaluator);
                     return (
-                      <li key={evaluator.user_id} id={`review-evaluator-${evaluator.user_id}`} tabIndex={-1} className="flex scroll-mt-24 flex-wrap items-center justify-between gap-3 px-5 py-4 transition hover:bg-slate-50/70 target:bg-teal-50 sm:px-6">
+                      <li key={id} id={`review-evaluator-${id}`} tabIndex={-1} className="flex scroll-mt-24 flex-wrap items-center justify-between gap-3 px-5 py-4 transition hover:bg-slate-50/70 target:bg-teal-50 sm:px-6">
                         <div className="flex min-w-0 items-center gap-3">
                           <span aria-hidden="true" className={`grid h-10 w-10 shrink-0 place-items-center rounded-full text-sm font-bold uppercase ${getAvatarColor(name)}`}>
-                            {evaluatorInitials(evaluator)}
+                            {marker}
                           </span>
                           <p className="min-w-0 text-sm font-semibold wrap-anywhere text-slate-900">{name}</p>
                         </div>
@@ -431,18 +401,9 @@ export function SubmissionsOverview({ audience = "admin" }: { audience?: "admin"
                             {submitted ? "Submitted" : "Pending"}
                           </span>
                           {submitted && (isSuperAdmin ? (
-                            <>
-                              <span className="text-xs text-slate-700 tabular-nums">
-                                Total {scoreLabel(evaluator.total_score)} · Mean {scoreLabel(evaluator.mean_score)}
-                              </span>
-                              <button
-                                type="button"
-                                onClick={() => reviewCommentsFor(evaluator)}
-                                className="rounded-lg border border-teal-200 bg-teal-50 px-3 py-2 text-xs font-semibold text-teal-900 transition hover:bg-teal-100 focus-visible:outline-2 focus-visible:outline-teal-700"
-                              >
-                                Review comments
-                              </button>
-                            </>
+                            <span className="text-xs text-slate-700 tabular-nums">
+                              Total {scoreLabel(evaluator.total_score)} ? Mean {scoreLabel(evaluator.mean_score)}
+                            </span>
                           ) : (
                             <button
                               type="button"
@@ -464,63 +425,6 @@ export function SubmissionsOverview({ audience = "admin" }: { audience?: "admin"
           )}
         </section>
       </div>
-      {isSuperAdmin && reviewEvaluator && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 p-4 backdrop-blur-sm"
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby="submission-comments-title"
-          onKeyDown={(event) => {
-            if (event.key === "Escape") closeCommentReview();
-          }}
-        >
-          <section className="max-h-[85vh] w-full max-w-2xl overflow-y-auto rounded-3xl border border-slate-200 bg-white p-5 shadow-2xl sm:p-7">
-            <div className="flex items-start justify-between gap-4">
-              <div>
-                <h2 id="submission-comments-title" className="text-xl font-bold text-[#1F3A5F]">
-                  Submission comments
-                </h2>
-                <p className="mt-1 text-sm text-slate-600">
-                  {evaluatorName(reviewEvaluator)}
-                </p>
-              </div>
-              <button
-                type="button"
-                autoFocus
-                onClick={closeCommentReview}
-                aria-label="Close submission comments"
-                className="rounded-xl border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-teal-700"
-              >
-                Close
-              </button>
-            </div>
-            {loadingComments && <p role="status" className="mt-5 text-sm text-slate-500">Loading comments…</p>}
-            {reviewError && (
-              <p role="alert" className="mt-5 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-                {reviewError}
-              </p>
-            )}
-            {!loadingComments && !reviewError && reviewComments.length === 0 && (
-              <p className="mt-5 rounded-lg bg-slate-50 px-4 py-5 text-sm text-slate-600">
-                No written comments were included in this submission.
-              </p>
-            )}
-            <div className="mt-5 space-y-3">
-              {reviewComments.map((comment) => (
-                <article key={comment.id} className="rounded-xl border border-slate-200 p-4">
-                  <div className="flex flex-wrap items-center justify-between gap-2">
-                    <h3 className="text-sm font-semibold text-slate-800">{comment.question}</h3>
-                    <span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs capitalize text-slate-600">
-                      {comment.status}
-                    </span>
-                  </div>
-                  <p className="mt-3 whitespace-pre-wrap text-sm leading-6 text-slate-700">{comment.body}</p>
-                </article>
-              ))}
-            </div>
-          </section>
-        </div>
-      )}
     </div>
   );
 }

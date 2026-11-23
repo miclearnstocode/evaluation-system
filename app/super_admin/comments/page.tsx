@@ -1,202 +1,107 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
+import ReviewPageHeader from "../../components/review-page-header";
 import { apiFetch } from "../../lib/api";
-import { getTargetLocationLabel, TARGET_TYPE_LABELS, type TargetType } from "../../lib/targets";
 
-type Cycle = { id: number; name: string; status: string; target_ids: number[] };
-type Target = { id: number; name: string; target_type: TargetType; campus_name: string | null; is_central: boolean | number };
-type ModerationStatus = "pending" | "approved" | "hidden";
-type Comment = { id: string; question_id: number; question: string; body: string; status: ModerationStatus };
+type Comment = { question: string; body: string };
+type Options = {
+  cycles: { id: number; name: string; target_ids: number[] }[];
+  targets: { id: number; name: string; office_head_name: string | null }[];
+};
 
-const statuses: ModerationStatus[] = ["pending", "approved", "hidden"];
+const selectClass = "mt-1.5 block w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-sm";
 
-export default function AdminCommentsPage() {
-  const [cycles, setCycles] = useState<Cycle[]>([]);
-  const [targets, setTargets] = useState<Target[]>([]);
+function OfficeComments({ cycleId, office }: { cycleId: number; office: Options["targets"][number] }) {
+  const [comments, setComments] = useState<Comment[] | null>(null);
+  const [error, setError] = useState("");
+  const [limit, setLimit] = useState(25);
+
+  useEffect(() => {
+    let active = true;
+    apiFetch<{ items: Comment[] }>(`/api/admin/super-admin/comments?cycle_id=${cycleId}&target_id=${office.id}`)
+      .then(data => { if (active) setComments(data.items); })
+      .catch((cause: Error) => { if (active) setError(cause.message); });
+    return () => { active = false; };
+  }, [cycleId, office.id]);
+
+  return (
+    <section aria-labelledby="office-comments-title" className="space-y-4 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
+      <div>
+        <h2 id="office-comments-title" className="text-lg font-bold text-slate-900">{office.name}</h2>
+        {office.office_head_name?.trim() && (
+          <p className="mt-1 text-sm text-slate-700">{office.office_head_name.trim()}</p>
+        )}
+        {comments && <p className="mt-1 text-sm text-slate-600">{comments.length} {comments.length === 1 ? "comment" : "comments"}</p>}
+      </div>
+      {error && <p role="alert" className="rounded-lg bg-red-50 p-3 text-sm text-red-800">{error}</p>}
+      {!error && comments === null && <p role="status" className="text-sm text-slate-600">Loading comments…</p>}
+      {comments?.length === 0 && <p className="text-sm text-slate-600">No comments for this office in the selected cycle.</p>}
+      {!!comments?.length && (
+        <ul className="space-y-3">
+          {comments.slice(0, limit).map((comment, index) => (
+            <li key={index} className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+              <h3 className="text-sm font-semibold text-slate-700">{comment.question}</h3>
+              <p className="mt-2 whitespace-pre-wrap wrap-anywhere text-sm text-slate-900">{comment.body}</p>
+            </li>
+          ))}
+        </ul>
+      )}
+      {comments && limit < comments.length && (
+        <button type="button" onClick={() => setLimit(limit + 25)} className="text-sm font-semibold text-teal-800 underline underline-offset-4">
+          Show more comments
+        </button>
+      )}
+    </section>
+  );
+}
+
+export default function SuperAdminCommentsPage() {
+  const [options, setOptions] = useState<Options | null>(null);
   const [cycleId, setCycleId] = useState("");
   const [targetId, setTargetId] = useState("");
-  const [status, setStatus] = useState<ModerationStatus>("pending");
-  const [comments, setComments] = useState<Comment[]>([]);
-  const [loadingOptions, setLoadingOptions] = useState(true);
-  const [loadingComments, setLoadingComments] = useState(false);
-  const [savingId, setSavingId] = useState("");
   const [error, setError] = useState("");
 
   useEffect(() => {
     let active = true;
-    Promise.all([
-      apiFetch<{ items: Cycle[] }>("/api/admin/cycles"),
-      apiFetch<{ items: Target[] }>("/api/admin/targets"),
-    ])
-      .then(([cycleData, targetData]) => {
-        if (!active) return;
-        const availableCycles = cycleData.items.filter((cycle) => cycle.status === "open" || cycle.status === "closed");
-        setCycles(availableCycles);
-        setTargets(targetData.items);
-        if (availableCycles.length) setCycleId(String(availableCycles[0].id));
-      })
-      .catch((requestError: Error) => {
-        if (active) setError(requestError.message);
-      })
-      .finally(() => {
-        if (active) setLoadingOptions(false);
-      });
-    return () => {
-      active = false;
-    };
+    apiFetch<Options>("/api/admin/results/options")
+      .then(data => { if (active) setOptions(data); })
+      .catch((cause: Error) => { if (active) setError(cause.message); });
+    return () => { active = false; };
   }, []);
 
-  const selectedCycle = cycles.find((cycle) => String(cycle.id) === cycleId);
-  const availableTargets = useMemo(
-    () => targets.filter((target) => selectedCycle?.target_ids.includes(target.id)),
-    [targets, selectedCycle],
-  );
-
-  useEffect(() => {
-    setTargetId(availableTargets.length ? String(availableTargets[0].id) : "");
-  }, [cycleId, availableTargets]);
-
-  useEffect(() => {
-    if (!cycleId || !targetId) {
-      setComments([]);
-      return;
-    }
-    let active = true;
-    setLoadingComments(true);
-    setError("");
-    apiFetch<{ items: Comment[] }>(
-      `/api/admin/comments?cycle_id=${encodeURIComponent(cycleId)}&target_id=${encodeURIComponent(targetId)}&status=${status}`,
-    )
-      .then((data) => {
-        if (!active) return;
-        setComments(data.items);
-      })
-      .catch((requestError: Error) => {
-        if (active) setError(requestError.message);
-      })
-      .finally(() => {
-        if (active) setLoadingComments(false);
-      });
-    return () => {
-      active = false;
-    };
-  }, [cycleId, targetId, status]);
-
-  async function moderate(commentId: string, nextStatus: "approved" | "hidden") {
-    setSavingId(commentId);
-    setError("");
-    try {
-      await apiFetch(`/api/admin/comments/${encodeURIComponent(commentId)}/moderate`, {
-        method: "POST",
-        body: JSON.stringify({ status: nextStatus }),
-      });
-      setComments((current) => current.filter((comment) => comment.id !== commentId));
-    } catch (requestError) {
-      setError(requestError instanceof Error ? requestError.message : "The comment could not be updated.");
-    } finally {
-      setSavingId("");
-    }
-  }
+  const cycle = options?.cycles.find(item => String(item.id) === cycleId) ?? options?.cycles[0];
+  const offices = options?.targets.filter(item => cycle?.target_ids.includes(item.id)) ?? [];
+  const office = offices.find(item => String(item.id) === targetId) ?? offices[0];
 
   return (
-    <div className="space-y-6">
-      <div>
-        <p className="text-sm font-medium text-teal-800">Content review</p>
-        <h1 className="mt-1 text-3xl font-bold tracking-tight text-[#1F3A5F]">Comment moderation</h1>
-        <p className="mt-2 text-sm text-slate-600">Comments appear as evaluators submit them, including while a cycle is open. Evaluator identities are not shown.</p>
-      </div>
-
-      <div className="grid gap-4 rounded-xl border border-slate-200 bg-white p-5 shadow-sm sm:grid-cols-2">
-        <label className="text-sm font-medium text-slate-700">
-          Evaluation cycle
-          <select
-            value={cycleId}
-            onChange={(event) => setCycleId(event.target.value)}
-            disabled={loadingOptions}
-            className="mt-1.5 block w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5"
-          >
-            <option value="">Select a cycle</option>
-            {cycles.map((cycle) => <option key={cycle.id} value={cycle.id}>{cycle.name}</option>)}
-          </select>
-        </label>
-        <label className="text-sm font-medium text-slate-700">
-          Evaluation target
-          <select
-            value={targetId}
-            onChange={(event) => setTargetId(event.target.value)}
-            disabled={!availableTargets.length}
-            className="mt-1.5 block w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5"
-          >
-            <option value="">Select a target</option>
-            {availableTargets.map((target) => (
-              <option key={target.id} value={target.id}>
-                {TARGET_TYPE_LABELS[target.target_type]}: {target.name} — {getTargetLocationLabel(target.campus_name, Boolean(target.is_central))}
-              </option>
-            ))}
-          </select>
-        </label>
-      </div>
-
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="flex gap-2" aria-label="Comment status">
-          {statuses.map((item) => (
-            <button
-              key={item}
-              type="button"
-              onClick={() => setStatus(item)}
-              aria-pressed={status === item}
-              className={`rounded-lg px-4 py-2 text-sm font-semibold capitalize ${
-                status === item ? "bg-[#1F3A5F] text-white" : "border border-slate-300 bg-white text-slate-600 hover:bg-slate-50"
-              }`}
-            >
-              {item}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      {error && <p role="alert" className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</p>}
-      {loadingComments && <p role="status" className="text-sm text-slate-500">Loading comments…</p>}
-      {!loadingOptions && !cycles.length && !error && (
-        <p className="rounded-lg border border-slate-200 bg-white px-5 py-6 text-sm text-slate-600">
-          No open or closed evaluation cycles are available for comment review.
-        </p>
+    <div className="mx-auto max-w-7xl space-y-6">
+      <ReviewPageHeader title="Comments" description="Browse written feedback by evaluation cycle and office." />
+      {error && <p role="alert" className="rounded-lg bg-red-50 p-4 text-sm text-red-800">{error}</p>}
+      {!error && !options && <p role="status" className="text-sm text-slate-600">Loading evaluation cycles…</p>}
+      {options && !cycle && <p className="text-sm text-slate-600">No evaluation cycles are available.</p>}
+      {cycle && (
+        <section aria-label="Comment filters" className="grid gap-4 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm sm:grid-cols-2">
+          <label className="min-w-0 text-sm font-semibold text-slate-700">
+            Evaluation cycle
+            <select value={cycle.id} onChange={event => { setCycleId(event.target.value); setTargetId(""); }} className={selectClass}>
+              {options?.cycles.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}
+            </select>
+          </label>
+          <label className="min-w-0 text-sm font-semibold text-slate-700">
+            Office
+            <select value={office?.id ?? ""} onChange={event => setTargetId(event.target.value)} disabled={!offices.length} className={selectClass}>
+              {!offices.length && <option value="">No offices available</option>}
+              {offices.map(item => (
+                <option key={item.id} value={item.id}>
+                  {[item.name, item.office_head_name?.trim()].filter(Boolean).join(" - ")}
+                </option>
+              ))}
+            </select>
+          </label>
+        </section>
       )}
-      {!loadingComments && cycleId && targetId && !comments.length && !error && (
-        <p className="rounded-lg border border-slate-200 bg-white px-5 py-6 text-sm text-slate-600">
-          No {status} comments are available for this target.
-        </p>
-      )}
-
-      <div className="space-y-4">
-        {comments.map((comment) => (
-          <article key={comment.id} className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
-            <h2 className="text-sm font-semibold text-[#1F3A5F]">{comment.question}</h2>
-            <p className="mt-3 whitespace-pre-wrap text-sm leading-6 text-slate-700">{comment.body}</p>
-            {status === "pending" && (
-              <div className="mt-4 flex justify-end gap-2 border-t border-slate-100 pt-4">
-                <button
-                  type="button"
-                  disabled={Boolean(savingId)}
-                  onClick={() => moderate(comment.id, "hidden")}
-                  className="rounded-lg border border-red-200 px-4 py-2 text-sm font-semibold text-red-700 hover:bg-red-50 disabled:opacity-60"
-                >
-                  Hide
-                </button>
-                <button
-                  type="button"
-                  disabled={Boolean(savingId)}
-                  onClick={() => moderate(comment.id, "approved")}
-                  className="rounded-lg bg-[#0F9D8A] px-4 py-2 text-sm font-semibold text-white hover:bg-[#0C8575] disabled:opacity-60"
-                >
-                  {savingId === comment.id ? "Saving…" : "Approve"}
-                </button>
-              </div>
-            )}
-          </article>
-        ))}
-      </div>
+      {cycle && office && <OfficeComments key={`${cycle.id}:${office.id}`} cycleId={cycle.id} office={office} />}
     </div>
   );
 }
