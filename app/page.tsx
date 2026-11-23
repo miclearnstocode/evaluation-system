@@ -67,7 +67,7 @@ export default function LoginPage() {
               AES
             </span>
             <span className="hidden font-semibold tracking-tight text-[#1F3A5F] sm:block">
-              Anonymous Evaluation System
+              CAPSU Evaluation System
             </span>
           </Link>
           <Link

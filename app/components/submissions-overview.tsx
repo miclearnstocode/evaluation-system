@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState, Fragment } from "react";
+import { useEffect, useRef, useState } from "react";
 import { apiFetch } from "../lib/api";
 import { getTargetLocationLabel, TARGET_TYPE_LABELS, type TargetType } from "../lib/targets";
 
@@ -35,6 +35,104 @@ function getAvatarColor(name: string) {
   return colors[charCode % colors.length];
 }
 
+function evaluatorName(evaluator: EvaluatorData) {
+  return [evaluator.first_name, evaluator.last_name].filter(Boolean).join(" ").trim() || evaluator.evaluator_email;
+}
+
+function evaluatorInitials(evaluator: EvaluatorData) {
+  return `${evaluator.first_name?.trim()[0] ?? ""}${evaluator.last_name?.trim()[0] ?? ""}`
+    || evaluatorName(evaluator)[0];
+}
+
+function scoreLabel(score: number | string | null | undefined) {
+  if (score === null || score === undefined) return "—";
+  const number = Number(score);
+  return Number.isFinite(number) ? number.toFixed(2) : "—";
+}
+
+function EvaluatorDiagram({
+  evaluators,
+  officeMean,
+}: {
+  evaluators: EvaluatorData[];
+  officeMean: number | null;
+}) {
+  const perRing = 24;
+  const innerRadius = 120;
+  const ringSpacing = 54;
+  const ringCount = Math.ceil(evaluators.length / perRing);
+  const outerRadius = innerRadius + (ringCount - 1) * ringSpacing;
+  const center = outerRadius + 24;
+  const nodes = evaluators.map((evaluator, index) => {
+    const ring = Math.floor(index / perRing);
+    const ringSize = Math.min(perRing, evaluators.length - ring * perRing);
+    const angle = ((index % perRing) / ringSize) * Math.PI * 2 - Math.PI / 2 + ring * 0.13;
+    const radius = innerRadius + ring * ringSpacing;
+    return {
+      evaluator,
+      x: center + Math.cos(angle) * radius,
+      y: center + Math.sin(angle) * radius,
+    };
+  });
+
+  return (
+    <figure className="border-b border-slate-200 px-5 py-5 sm:px-6">
+      <figcaption className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h3 id="evaluator-diagram-title" className="font-semibold text-[#1F3A5F]">Evaluator diagram</h3>
+          <p className="mt-1 text-xs text-slate-600">Select a marker to find that evaluator in the list.</p>
+        </div>
+        <div className="flex flex-wrap gap-3 text-xs font-semibold text-slate-700">
+          <span className="inline-flex items-center gap-1.5">
+            <span aria-hidden="true" className="h-2 w-2 rounded-full bg-teal-600" /> Submitted
+          </span>
+          <span className="inline-flex items-center gap-1.5">
+            <span aria-hidden="true" className="h-2 w-2 rounded-full bg-amber-500" /> Pending
+          </span>
+        </div>
+      </figcaption>
+      <svg
+        viewBox={`0 0 ${center * 2} ${center * 2}`}
+        aria-labelledby="evaluator-diagram-title"
+        className="mx-auto mt-4 block w-full max-w-sm"
+      >
+        <g aria-hidden="true">
+          {nodes.map(({ evaluator, x, y }) => (
+            <line key={evaluator.user_id} x1={center} y1={center} x2={x} y2={y} className="stroke-slate-300" strokeDasharray="3 4" />
+          ))}
+          <circle cx={center} cy={center} r={55} className="fill-teal-50 stroke-teal-200" strokeWidth={2} />
+          <text x={center} y={center - 8} textAnchor="middle" className="fill-teal-800 text-[11px] font-semibold">
+            Office mean
+          </text>
+          <text x={center} y={center + 18} textAnchor="middle" className="fill-[#1F3A5F] text-[24px] font-bold tabular-nums">
+            {scoreLabel(officeMean)}
+          </text>
+        </g>
+        {nodes.map(({ evaluator, x, y }) => {
+          const submitted = Boolean(evaluator.submission_token);
+          const label = `${evaluatorName(evaluator)} · ${submitted ? "Submitted" : "Pending"}`;
+          return (
+            <a key={evaluator.user_id} href={`#review-evaluator-${evaluator.user_id}`} aria-label={label} className="group">
+              <title>{label}</title>
+              <circle
+                cx={x}
+                cy={y}
+                r={13}
+                className={submitted
+                  ? "fill-teal-100 stroke-teal-600 group-hover:fill-teal-200 group-focus-visible:stroke-[3]"
+                  : "fill-amber-100 stroke-amber-600 group-hover:fill-amber-200 group-focus-visible:stroke-[3]"}
+              />
+              <text x={x} y={y} textAnchor="middle" dominantBaseline="central" className="fill-slate-900 text-[9px] font-bold uppercase">
+                {evaluatorInitials(evaluator)}
+              </text>
+            </a>
+          );
+        })}
+      </svg>
+    </figure>
+  );
+}
+
 export function SubmissionsOverview({ audience = "admin" }: { audience?: "admin" | "super_admin" }) {
   const isSuperAdmin = audience === "super_admin";
   const [cycles, setCycles] = useState<Cycle[]>([]);
@@ -46,6 +144,7 @@ export function SubmissionsOverview({ audience = "admin" }: { audience?: "admin"
   const [officeMean, setOfficeMean] = useState<number | null>(null);
   
   const [loadedSubmissionKey, setLoadedSubmissionKey] = useState("");
+  const [loadingOptions, setLoadingOptions] = useState(true);
   const [deletingToken, setDeletingToken] = useState("");
   const [error, setError] = useState("");
   const [reviewEvaluator, setReviewEvaluator] = useState<EvaluatorData | null>(null);
@@ -81,7 +180,8 @@ export function SubmissionsOverview({ audience = "admin" }: { audience?: "admin"
           if (firstTarget) setTargetId(String(firstTarget.id));
         }
       })
-      .catch((requestError: Error) => { if (active) setError(requestError.message); });
+      .catch((requestError: Error) => { if (active) setError(requestError.message); })
+      .finally(() => { if (active) setLoadingOptions(false); });
     return () => { active = false; };
   }, [isSuperAdmin]);
 
@@ -116,6 +216,14 @@ export function SubmissionsOverview({ audience = "admin" }: { audience?: "admin"
     setLoadingComments(false);
   }
 
+  function resetSelection() {
+    closeCommentReview();
+    setError("");
+    setEvaluators([]);
+    setOfficeMean(null);
+    setLoadedSubmissionKey("");
+  }
+
   async function reviewCommentsFor(evaluator: EvaluatorData) {
     if (!isSuperAdmin || !evaluator.submission_token) return;
     const requestId = ++reviewRequestId.current;
@@ -138,13 +246,8 @@ export function SubmissionsOverview({ audience = "admin" }: { audience?: "admin"
   }
 
   async function removeSubmission(evaluator: EvaluatorData) {
-    if (!evaluator.submission_token) return;
-    
-    const displayName = evaluator.first_name || evaluator.last_name 
-      ? `${evaluator.first_name ?? ''} ${evaluator.last_name ?? ''}`.trim() 
-      : evaluator.evaluator_email;
-      
-    if (!window.confirm(`Remove the evaluation submitted by ${displayName}?`)) return;
+    if (isSuperAdmin || deletingToken || !evaluator.submission_token) return;
+    if (!window.confirm(`Remove the evaluation submitted by ${evaluatorName(evaluator)}?`)) return;
 
     setError("");
     setDeletingToken(evaluator.submission_token);
@@ -176,280 +279,217 @@ export function SubmissionsOverview({ audience = "admin" }: { audience?: "admin"
     }
   }
 
-  // --- Radial Layout Calculation ---
-  const centerX = 500;
-  const centerY = 350;
-  const radiusX = 380; 
-  const radiusY = 250; 
-
-  const positionedEvaluators = evaluators.map((evaluator, index) => {
-    const angle = (index / Math.max(evaluators.length, 1)) * 2 * Math.PI - Math.PI / 2;
-    const x = centerX + radiusX * Math.cos(angle);
-    const y = centerY + radiusY * Math.sin(angle);
-    return { ...evaluator, x, y };
-  });
-
-  const currentTarget = availableTargets.find((t) => String(t.id) === targetId);
+  const currentTarget = availableTargets.find((target) => String(target.id) === targetId);
+  const submittedCount = evaluators.filter((evaluator) => evaluator.submission_token).length;
 
   return (
-    <div className="min-h-screen bg-slate-50/50 text-slate-900">
-      
-      {/* Top Bar */}
-      <div className="border-b border-slate-200 bg-white px-6 py-5 sm:px-8">
-        <div className="mx-auto flex max-w-350 flex-col sm:flex-row sm:items-center justify-between gap-4">
+    <div className="mx-auto max-w-7xl space-y-7">
+      <header className="relative isolate overflow-hidden rounded-3xl bg-linear-to-br from-[#162B46] via-[#1F3A5F] to-[#126B64] px-6 py-7 text-white shadow-lg shadow-slate-900/10 sm:px-9 sm:py-9">
+        <div aria-hidden="true" className="pointer-events-none absolute inset-y-0 right-0 -z-10 w-2/3 bg-[linear-gradient(to_right,#ffffff14_1px,transparent_1px),linear-gradient(to_bottom,#ffffff14_1px,transparent_1px)] bg-size-[28px_28px] mask-[linear-gradient(to_left,black,transparent_85%)]" />
+        <div className="flex flex-wrap items-center justify-between gap-6">
           <div>
-            <h1 className="text-2xl font-bold tracking-tight text-[#1F3A5F]">
-              {isSuperAdmin ? "Super Admin Submission Review" : "Evaluation Overview"}
+            <h1 className="text-4xl font-bold tracking-tight sm:text-5xl">
+              {isSuperAdmin ? "Submission Review" : "Review Submissions"}
             </h1>
-            <p className="mt-1 text-sm text-slate-500">
+            <p className="mt-3 max-w-lg text-sm leading-6 text-slate-100">
               {isSuperAdmin
-                ? "Review each evaluator’s scores and submitted comments by office."
-                : "Review the evaluators and their status for each office."}
+                ? "Review submission status, individual scores, and written comments by office."
+                : "Review evaluator submission status and office mean scores by evaluation cycle."}
             </p>
           </div>
-          
-          <div className="flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2 shadow-sm">
-            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-5 w-5 text-[#1F3A5F]">
-              <rect x="3" y="4" width="18" height="18" rx="2" ry="2" />
-              <line x1="16" y1="2" x2="16" y2="6" />
-              <line x1="8" y1="2" x2="8" y2="6" />
-              <line x1="3" y1="10" x2="21" y2="10" />
-            </svg>
+          <label className="block w-full min-w-0 rounded-2xl border border-white/25 bg-white/10 p-4 text-sm font-semibold text-teal-50 sm:max-w-xs">
+            Evaluation cycle
             <select
               value={cycleId}
-              onChange={(e) => {
-                closeCommentReview();
-                setCycleId(e.target.value);
-                const nextCycle = cycles.find(c => String(c.id) === e.target.value);
-                const nextTargets = targets.filter(t => nextCycle?.target_ids.includes(t.id));
-                setTargetId(nextTargets.length ? String(nextTargets[0].id) : "");
+              disabled={loadingOptions || cycles.length === 0 || Boolean(deletingToken)}
+              onChange={(event) => {
+                const nextCycleId = event.target.value;
+                const nextCycle = cycles.find((cycle) => String(cycle.id) === nextCycleId);
+                const nextTarget = targets.find((target) => nextCycle?.target_ids.includes(target.id));
+                resetSelection();
+                setCycleId(nextCycleId);
+                setTargetId(nextTarget ? String(nextTarget.id) : "");
               }}
-              className="bg-transparent text-sm font-semibold text-[#1F3A5F] outline-none cursor-pointer"
+              className="mt-2 block w-full rounded-xl bg-white px-3.5 py-2.5 text-sm font-medium text-slate-900 outline-none focus-visible:ring-4 focus-visible:ring-teal-200/50 disabled:opacity-70"
             >
+              <option value="">{loadingOptions ? "Loading cycles…" : "Select a cycle"}</option>
               {cycles.map((cycle) => (
                 <option key={cycle.id} value={cycle.id}>{cycle.name} ({cycle.status})</option>
               ))}
             </select>
-          </div>
+          </label>
         </div>
-      </div>
+      </header>
 
-      {error && <p className="mx-auto max-w-350 mt-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</p>}
+      {error && (
+        <p role="alert" className="rounded-2xl border border-red-200 bg-red-50 px-5 py-4 text-sm text-red-800">{error}</p>
+      )}
 
-      {/* Main Content Area */}
-      <div className="mx-auto flex max-w-350 flex-col md:flex-row gap-6 p-4 sm:p-8">
-        
-        {/* Left Sidebar: Scrollable Office List */}
-        <aside className="w-full md:w-80 shrink-0 flex flex-col rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden h-[calc(100vh-140px)]">
-          <div className="border-b border-slate-100 p-4 bg-slate-50/50">
-            <h2 className="font-semibold text-[#1F3A5F]">Offices / Targets</h2>
-            <p className="text-xs text-slate-500 mt-1">{availableTargets.length} items in this cycle</p>
+      <div className="grid items-start gap-6 xl:grid-cols-[minmax(15rem,18rem)_minmax(0,1fr)]">
+        <aside aria-labelledby="review-targets-title" className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+          <div className="border-b border-slate-200 bg-slate-50 px-5 py-4">
+            <h2 id="review-targets-title" className="font-semibold text-[#1F3A5F]">Evaluation targets</h2>
+            {selectedCycle && (
+              <p className="mt-1 text-xs text-slate-600">{availableTargets.length} in this cycle</p>
+            )}
           </div>
-          
-          <div className="flex-1 overflow-y-auto">
-            {availableTargets.map((target) => {
-              const isSelected = String(target.id) === targetId;
-              return (
-                <button
-                  key={target.id}
-                  onClick={() => {
-                    closeCommentReview();
-                    setTargetId(String(target.id));
-                  }}
-                  className={`w-full text-left px-4 py-3 border-b border-slate-100 transition-colors flex flex-col gap-1 ${
-                    isSelected 
-                      ? "bg-teal-50 border-l-4 border-l-teal-500" 
-                      : "border-l-4 border-l-transparent hover:bg-slate-50"
-                  }`}
-                >
-                  <span className={`font-semibold ${isSelected ? 'text-teal-900' : 'text-slate-800'}`}>
-                    {target.name}
-                  </span>
-                  <span className="text-xs text-slate-500 truncate">
-                    {TARGET_TYPE_LABELS[target.target_type]} · {getTargetLocationLabel(target.campus_name, Boolean(target.is_central))}
-                  </span>
-                </button>
-              );
-            })}
-          </div>
+          {availableTargets.length === 0 ? (
+            <p className="px-5 py-5 text-sm text-slate-600">
+              {loadingOptions ? "Loading targets…" : selectedCycle ? "This cycle has no evaluation targets." : "No cycle selected."}
+            </p>
+          ) : (
+            <ul className="max-h-64 space-y-1 overflow-y-auto p-2 xl:max-h-[36rem]">
+              {availableTargets.map((target) => {
+                const isSelected = String(target.id) === targetId;
+                return (
+                  <li key={target.id}>
+                    <button
+                      type="button"
+                      aria-pressed={isSelected}
+                      disabled={Boolean(deletingToken)}
+                      onClick={() => {
+                        if (isSelected) return;
+                        resetSelection();
+                        setTargetId(String(target.id));
+                      }}
+                      className={`block w-full rounded-xl border px-3.5 py-3 text-left transition focus-visible:outline-2 focus-visible:outline-teal-700 disabled:cursor-wait ${
+                        isSelected ? "border-teal-200 bg-teal-50 text-teal-950" : "border-transparent text-slate-800 hover:bg-slate-50"
+                      }`}
+                    >
+                      <span className="block text-sm font-semibold">{target.name}</span>
+                      <span className="mt-1 block text-xs text-slate-600">
+                        {TARGET_TYPE_LABELS[target.target_type]} · {getTargetLocationLabel(target.campus_name, Boolean(target.is_central))}
+                      </span>
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
         </aside>
 
-        {/* Right Side: Radial Diagram */}
-        <main className="flex-1 min-w-0">
-          {loadingSubmissions ? (
-            <div className="flex h-150 items-center justify-center rounded-3xl border border-slate-200 bg-white">
-               <svg className="mr-3 h-8 w-8 animate-spin text-teal-600" viewBox="0 0 24 24" fill="none">
-                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-              </svg>
-            </div>
-          ) : currentTarget ? (
-            <div className="relative w-full overflow-x-auto rounded-3xl border border-slate-200 bg-white p-8 shadow-sm">
-              
-              <div className="relative mx-auto h-175 min-w-250">
-                
-                {/* Connector Lines */}
-                <svg className="absolute inset-0 h-full w-full pointer-events-none">
-                  {positionedEvaluators.map((e) => (
-                    <line
-                      key={`line-${e.user_id}`}
-                      x1={centerX}
-                      y1={centerY}
-                      x2={e.x}
-                      y2={e.y}
-                      stroke="#CBD5E1"
-                      strokeWidth="2"
-                      strokeDasharray="6 6"
-                    />
-                  ))}
-                </svg>
+        <section aria-labelledby="review-office-title" className="min-w-0 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+          <div className="border-b border-slate-200 px-5 py-5 sm:px-6">
+            <h2 id="review-office-title" className="text-xl font-bold tracking-tight text-[#1F3A5F]">
+              {currentTarget?.name ?? "Office review"}
+            </h2>
+            {currentTarget && (
+              <p className="mt-1 text-sm text-slate-600">
+                {getTargetLocationLabel(currentTarget.campus_name, Boolean(currentTarget.is_central))}
+              </p>
+            )}
+          </div>
 
-                {/* Center Office Hub */}
-                <div 
-                  className="absolute flex h-55 w-55 -translate-x-1/2 -translate-y-1/2 flex-col items-center justify-center rounded-full border-10 border-white bg-linear-to-b from-blue-50 to-white shadow-xl shadow-blue-900/10"
-                  style={{ left: centerX, top: centerY }}
-                >
-                  <div className="absolute inset-0 rounded-full border-8 border-transparent [background:linear-gradient(135deg,#0EA5E9,#10B981)_border-box] [-webkit-mask:linear-gradient(#fff_0_0)_padding-box,linear-gradient(#fff_0_0)] [-webkit-mask-composite:xor] mask-exclude pointer-events-none opacity-80" />
-                  
-                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="#1E3A8A" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="mb-2 h-12 w-12">
-                    <path d="M3 21h18" />
-                    <path d="M9 8h1" /><path d="M9 12h1" /><path d="M9 16h1" />
-                    <path d="M14 8h1" /><path d="M14 12h1" /><path d="M14 16h1" />
-                    <path d="M5 21V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v16" />
-                  </svg>
-                  
-                  <h3 className="w-40 text-center text-lg font-bold leading-tight text-[#1F3A5F]">
-                    {currentTarget.name}
-                  </h3>
-                  
-                  <div className="mt-2 flex flex-col items-center rounded-full bg-white px-6 py-2 shadow-sm border border-slate-100">
-                    <span className="text-[10px] font-semibold uppercase tracking-widest text-slate-400">Mean Score</span>
-                    <span className="text-2xl font-black text-[#1F3A5F]">{officeMean !== null ? officeMean.toFixed(2) : "—"}</span>
-                  </div>
-                </div>
-
-                {positionedEvaluators.map((e) => {
-                  const fullName = `${e.first_name ?? ''} ${e.last_name ?? ''}`.trim() || e.evaluator_email;
-                  const isSubmitted = !!e.submission_token;
-                  const avatarColor = getAvatarColor(fullName);
-                  
-                  return (
-                    <Fragment key={e.user_id}>
-                      <div
-                        className="absolute flex w-70 -translate-x-1/2 -translate-y-1/2 items-center gap-3 rounded-2xl border border-slate-100 bg-white p-3 shadow-lg shadow-slate-200/50 transition hover:scale-105"
-                        style={{ left: e.x, top: e.y }}
-                      >
-                        <div className="relative">
-                          <div className={`flex h-14 w-14 shrink-0 items-center justify-center rounded-full text-lg font-bold ${avatarColor}`}>
-                            {e.first_name?.[0]}{e.last_name?.[0]}
-                          </div>
-                          <div className={`absolute -bottom-1 -right-1 flex h-6 w-6 items-center justify-center rounded-full border-2 border-white ${isSubmitted ? 'bg-green-500 text-white' : 'bg-amber-400 text-white'}`}>
-                            {isSubmitted ? (
-                              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" className="h-3 w-3"><polyline points="20 6 9 17 4 12" /></svg>
-                            ) : (
-                              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" className="h-3 w-3"><circle cx="12" cy="12" r="10" /><polyline points="12 6 12 12 16 14" /></svg>
-                            )}
-                          </div>
-                        </div>
-                        
-                        <div className="flex-1 min-w-0">
-                          <p className="truncate text-sm font-bold text-slate-800">{fullName}</p>
-                          
-                          {isSubmitted ? (
-                            <div>
-                              <div className="mt-1 flex items-center gap-1 text-[11px] font-medium text-green-600">
-                                <div className="flex h-4 w-4 items-center justify-center rounded-full bg-green-100">
-                                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" className="h-2.5 w-2.5"><polyline points="20 6 9 17 4 12" /></svg>
-                                </div>
-                                Evaluated
-                              </div>
-                              {isSuperAdmin && (
-                                <div className="mt-1 text-[10px] font-medium leading-4 text-slate-500">
-                                  <p>Total: {e.total_score !== null && e.total_score !== undefined ? Number(e.total_score).toFixed(2) : "—"}</p>
-                                  <p>Mean: {e.mean_score !== null ? Number(e.mean_score).toFixed(2) : "—"}</p>
-                                  <button
-                                    type="button"
-                                    onClick={() => reviewCommentsFor(e)}
-                                    className="mt-1 text-[11px] font-semibold text-teal-700 hover:underline"
-                                  >
-                                    Review comments
-                                  </button>
-                                </div>
-                              )}
-                            </div>
-                          ) : (
-                            <div className="mt-1 flex items-center gap-1 text-[11px] font-medium text-amber-600">
-                              <div className="flex h-4 w-4 items-center justify-center rounded-full bg-amber-100">
-                                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" className="h-2.5 w-2.5"><circle cx="12" cy="12" r="10" /><polyline points="12 6 12 12 16 14" /></svg>
-                              </div>
-                              Pending
-                            </div>
-                          )}
-                        </div>
-
-                        {isSubmitted && !isSuperAdmin && (
-                          <button
-                            onClick={() => removeSubmission(e)}
-                            disabled={deletingToken === e.submission_token}
-                            className="absolute -right-2 -top-2 flex h-7 w-7 items-center justify-center rounded-full bg-red-100 text-red-600 shadow-sm transition hover:bg-red-200 hover:text-red-700 disabled:opacity-50"
-                            title="Remove Evaluation"
-                          >
-                            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-3.5 w-3.5">
-                              <path d="M3 6h18" /><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
-                            </svg>
-                          </button>
-                        )}
-                      </div>
-                    </Fragment>
-                  );
-                })}
-              </div>
-              
-              <div className="mt-4 flex items-center justify-center gap-8 border-t border-slate-100 pt-6">
-                 <div className="flex items-center gap-2 text-sm font-medium text-slate-600">
-                   <div className="flex h-6 w-6 items-center justify-center rounded-full bg-green-500 text-white">
-                     <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" className="h-3 w-3"><polyline points="20 6 9 17 4 12" /></svg>
-                   </div>
-                   Evaluated
-                 </div>
-                 <div className="flex items-center gap-2 text-sm font-medium text-slate-600">
-                   <div className="flex h-6 w-6 items-center justify-center rounded-full bg-amber-400 text-white">
-                      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" className="h-3 w-3"><circle cx="12" cy="12" r="10" /><polyline points="12 6 12 12 16 14" /></svg>
-                   </div>
-                   Pending
-                 </div>
-              </div>
-            </div>
+          {loadingOptions || loadingSubmissions ? (
+            <p role="status" className="px-5 py-8 text-sm text-slate-600 sm:px-6">Loading submissions…</p>
+          ) : !currentTarget ? (
+            <p className="px-5 py-8 text-sm text-slate-600 sm:px-6">
+              {cycles.length === 0 ? "No open or closed cycles are available for review." : "Select an evaluation target to view submissions."}
+            </p>
+          ) : error && evaluators.length === 0 ? (
+            <p className="px-5 py-8 text-sm text-slate-600 sm:px-6">Submission data is unavailable.</p>
           ) : (
-             <div className="flex h-150 items-center justify-center rounded-3xl border border-slate-200 bg-white text-slate-500">
-               Select an office from the list to view the evaluations.
-             </div>
+            <div>
+              <dl aria-label="Office submission summary" className="grid gap-3 border-b border-slate-100 bg-slate-50 px-5 py-4 sm:grid-cols-3 sm:px-6">
+                <div className="rounded-xl border border-teal-100 bg-teal-50 px-4 py-3">
+                  <dt className="text-xs font-semibold text-teal-900">Office mean score</dt>
+                  <dd className="mt-1 text-2xl font-bold text-teal-950 tabular-nums">{scoreLabel(officeMean)}</dd>
+                </div>
+                <div className="rounded-xl border border-slate-200 bg-white px-4 py-3">
+                  <dt className="text-xs font-semibold text-slate-600">Submitted</dt>
+                  <dd className="mt-1 text-2xl font-bold text-[#1F3A5F] tabular-nums">{submittedCount}</dd>
+                </div>
+                <div className="rounded-xl border border-slate-200 bg-white px-4 py-3">
+                  <dt className="text-xs font-semibold text-slate-600">Pending</dt>
+                  <dd className="mt-1 text-2xl font-bold text-[#1F3A5F] tabular-nums">{evaluators.length - submittedCount}</dd>
+                </div>
+              </dl>
+
+              {evaluators.length > 0 && <EvaluatorDiagram evaluators={evaluators} officeMean={officeMean} />}
+
+              {evaluators.length === 0 ? (
+                <p className="px-5 py-8 text-sm text-slate-600 sm:px-6">No evaluators are listed for this target.</p>
+              ) : (
+                <ul aria-label="Evaluators" className="divide-y divide-slate-100">
+                  {evaluators.map((evaluator) => {
+                    const name = evaluatorName(evaluator);
+                    const submitted = Boolean(evaluator.submission_token);
+                    return (
+                      <li key={evaluator.user_id} id={`review-evaluator-${evaluator.user_id}`} tabIndex={-1} className="flex scroll-mt-24 flex-wrap items-center justify-between gap-3 px-5 py-4 transition hover:bg-slate-50/70 target:bg-teal-50 sm:px-6">
+                        <div className="flex min-w-0 items-center gap-3">
+                          <span aria-hidden="true" className={`grid h-10 w-10 shrink-0 place-items-center rounded-full text-sm font-bold uppercase ${getAvatarColor(name)}`}>
+                            {evaluatorInitials(evaluator)}
+                          </span>
+                          <p className="min-w-0 text-sm font-semibold wrap-anywhere text-slate-900">{name}</p>
+                        </div>
+
+                        <div className="flex flex-wrap items-center gap-2 sm:gap-3">
+                          <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-semibold ring-1 ring-inset ${
+                            submitted ? "bg-teal-50 text-teal-800 ring-teal-200" : "bg-amber-50 text-amber-800 ring-amber-200"
+                          }`}>
+                            <span aria-hidden="true" className="h-1.5 w-1.5 rounded-full bg-current" />
+                            {submitted ? "Submitted" : "Pending"}
+                          </span>
+                          {submitted && (isSuperAdmin ? (
+                            <>
+                              <span className="text-xs text-slate-700 tabular-nums">
+                                Total {scoreLabel(evaluator.total_score)} · Mean {scoreLabel(evaluator.mean_score)}
+                              </span>
+                              <button
+                                type="button"
+                                onClick={() => reviewCommentsFor(evaluator)}
+                                className="rounded-lg border border-teal-200 bg-teal-50 px-3 py-2 text-xs font-semibold text-teal-900 transition hover:bg-teal-100 focus-visible:outline-2 focus-visible:outline-teal-700"
+                              >
+                                Review comments
+                              </button>
+                            </>
+                          ) : (
+                            <button
+                              type="button"
+                              aria-label={`Remove evaluation for ${name}`}
+                              onClick={() => removeSubmission(evaluator)}
+                              disabled={Boolean(deletingToken)}
+                              className="rounded-lg border border-red-200 px-3 py-2 text-xs font-semibold text-red-700 transition hover:bg-red-50 focus-visible:outline-2 focus-visible:outline-red-700 disabled:cursor-wait disabled:opacity-60"
+                            >
+                              {deletingToken === evaluator.submission_token ? "Removing…" : "Remove"}
+                            </button>
+                          ))}
+                        </div>
+                      </li>
+                    );
+                  })}
+                </ul>
+              )}
+            </div>
           )}
-        </main>
+        </section>
       </div>
       {isSuperAdmin && reviewEvaluator && (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/40 p-4"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 p-4 backdrop-blur-sm"
           role="dialog"
           aria-modal="true"
           aria-labelledby="submission-comments-title"
+          onKeyDown={(event) => {
+            if (event.key === "Escape") closeCommentReview();
+          }}
         >
-          <section className="max-h-[85vh] w-full max-w-2xl overflow-y-auto rounded-2xl bg-white p-5 shadow-2xl sm:p-7">
+          <section className="max-h-[85vh] w-full max-w-2xl overflow-y-auto rounded-3xl border border-slate-200 bg-white p-5 shadow-2xl sm:p-7">
             <div className="flex items-start justify-between gap-4">
               <div>
                 <h2 id="submission-comments-title" className="text-xl font-bold text-[#1F3A5F]">
                   Submission comments
                 </h2>
                 <p className="mt-1 text-sm text-slate-600">
-                  {[reviewEvaluator.first_name, reviewEvaluator.last_name].filter(Boolean).join(" ") ||
-                    reviewEvaluator.evaluator_email}
+                  {evaluatorName(reviewEvaluator)}
                 </p>
               </div>
               <button
                 type="button"
+                autoFocus
                 onClick={closeCommentReview}
                 aria-label="Close submission comments"
-                className="rounded-lg border border-slate-300 px-3 py-1.5 text-sm font-semibold text-slate-600 hover:bg-slate-50"
+                className="rounded-xl border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-teal-700"
               >
                 Close
               </button>

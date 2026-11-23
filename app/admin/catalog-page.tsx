@@ -36,7 +36,7 @@ const config: Record<CatalogKind, { title: string; path: string; description?: s
     title: "Users",
     path: "/api/admin/users",
     description:
-      "Create admin accounts for office-level mean scores only, or super-admin accounts for full evaluator scores and system management. Deactivate evaluator accounts to disable access while preserving their existing records.",
+      "Create admin accounts and manage access for existing users. Deactivating an evaluator preserves their submitted evaluations.",
   },
 };
 
@@ -50,6 +50,43 @@ function normalizeCatalogItems(kind: CatalogKind, rows: CatalogRow[]) {
   return kind === "targets"
     ? rows.map((item) => ({ ...item, target_type: item.target_type ?? item.office_type }))
     : rows;
+}
+
+function CatalogHeader({
+  title,
+  description,
+  counts,
+}: {
+  title: string;
+  description: string;
+  counts: { label: string; total: number; active: number } | null;
+}) {
+  return (
+    <header className="relative isolate overflow-hidden rounded-3xl bg-linear-to-br from-[#162B46] via-[#1F3A5F] to-[#126B64] px-6 py-7 text-white shadow-lg shadow-slate-900/10 sm:px-9 sm:py-9">
+      <div
+        aria-hidden="true"
+        className="pointer-events-none absolute inset-y-0 right-0 -z-10 w-full bg-[linear-gradient(to_right,#ffffff14_1px,transparent_1px),linear-gradient(to_bottom,#ffffff14_1px,transparent_1px)] bg-size-[28px_28px] mask-[linear-gradient(to_left,black,transparent_85%)] sm:w-2/3"
+      />
+      <div className="flex flex-wrap items-center justify-between gap-6">
+        <div>
+          <h1 className="text-4xl font-bold tracking-tight sm:text-5xl">{title}</h1>
+          <p className="mt-3 max-w-md text-sm leading-6 text-slate-100">{description}</p>
+        </div>
+        {counts && (
+          <dl className="grid w-full grid-cols-2 divide-x divide-white/20 rounded-2xl border border-white/25 bg-white/10 sm:w-auto">
+            <div className="px-5 py-4">
+              <dt className="text-xs font-semibold text-teal-100">Total {counts.label}</dt>
+              <dd className="mt-1 text-3xl font-bold tabular-nums">{counts.total}</dd>
+            </div>
+            <div className="px-5 py-4">
+              <dt className="text-xs font-semibold text-teal-100">Active</dt>
+              <dd className="mt-1 text-3xl font-bold tabular-nums">{counts.active}</dd>
+            </div>
+          </dl>
+        )}
+      </div>
+    </header>
+  );
 }
 
 export default function CatalogPage({ kind }: { kind: CatalogKind }) {
@@ -117,6 +154,7 @@ export default function CatalogPage({ kind }: { kind: CatalogKind }) {
         last_name: form.last_name?.trim() ?? "",
         email: form.email ?? "",
         password: form.password ?? "",
+        role: "admin",
       };
     }
 
@@ -243,7 +281,7 @@ export default function CatalogPage({ kind }: { kind: CatalogKind }) {
           ]
         : [
             (
-              <div key="role-note" className="sm:col-span-2 lg:col-span-3">
+              <div key="role-note" className="col-span-full">
                 <div className="flex items-start gap-2.5 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-xs text-slate-600">
                   <svg viewBox="0 0 20 20" fill="currentColor" className="mt-0.5 h-4 w-4 shrink-0 text-[#0F9D8A]">
                     <path
@@ -265,27 +303,117 @@ export default function CatalogPage({ kind }: { kind: CatalogKind }) {
             input("password", "Initial password (at least 12 characters)", true, "password"),
           ];
 
-  const columns: [string, string][] =
-    kind === "campuses"
-      ? [
-          ["Code", "code"],
-          ["Name", "name"],
-          ["Type", "is_central"],
-        ]
-      : kind === "targets"
-        ? [
-            ["Target", "name"],
-            ["Type", "target_type"],
-            ["Campus / Scope", "campus_name"],
-          ]
-        : [
-            ["Name", "display_name"],
-            ["Account role", "role"],
-            ["Position/Role", "position_role"],
-            ["Assigned targets", "office_unit_name"],
-            ["Campus", "campus_name"],
-            ["Years of Service / Stay", "years_of_service"],
-          ];
+  const counts = !loading && (!error || items.length > 0)
+    ? { label: kind, total: items.length, active: items.filter((item) => item.active).length }
+    : null;
+
+  if (kind !== "users") {
+    const isCampusCatalog = kind === "campuses";
+    const directoryTitle = isCampusCatalog ? "Campus directory" : "Target directory";
+    const addLabel = isCampusCatalog ? "Add campus" : "Add target";
+    const recordsLabel = isCampusCatalog ? "campuses" : "targets";
+
+    return (
+      <div className="mx-auto max-w-7xl space-y-7">
+        <CatalogHeader
+          title={title}
+          description={isCampusCatalog
+            ? "Manage which campuses are available for evaluator registration and office assignments."
+            : "Manage the six target categories evaluated in each cycle. Campus Administrators and Satellite College Directors must be linked to a campus."}
+          counts={counts}
+        />
+
+        {error && (
+          <p role="alert" className="rounded-2xl border border-red-200 bg-red-50 px-5 py-4 text-sm text-red-800">
+            {error}
+          </p>
+        )}
+
+        <div className="grid items-start gap-6 xl:grid-cols-[minmax(0,1fr)_20rem]">
+          <section aria-labelledby="catalog-directory-title" className="min-w-0">
+            <h2 id="catalog-directory-title" className="text-xl font-bold tracking-tight text-[#1F3A5F]">
+              {directoryTitle}
+            </h2>
+            {loading ? (
+              <p role="status" className="mt-4 rounded-2xl border border-slate-200 bg-white p-5 text-sm text-slate-600">
+                Loading {recordsLabel}…
+              </p>
+            ) : items.length === 0 ? (
+              <p className="mt-4 rounded-2xl border border-dashed border-slate-300 bg-white p-6 text-sm text-slate-600">
+                {error ? "Records are unavailable." : `No ${recordsLabel} have been added.`}
+              </p>
+            ) : (
+              <ul className="mt-4 grid gap-4 sm:grid-cols-2">
+                {items.map((item) => (
+                  <li key={item.id} className="flex min-w-0 flex-col rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      {item.code && (
+                        <span className="rounded-md bg-slate-100 px-2 py-1 text-xs font-semibold break-all text-slate-700">
+                          {item.code}
+                        </span>
+                      )}
+                      <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-semibold ring-1 ring-inset ${
+                        item.active ? "bg-teal-50 text-teal-800 ring-teal-200" : "bg-slate-100 text-slate-700 ring-slate-200"
+                      }`}>
+                        <span aria-hidden="true" className="h-1.5 w-1.5 rounded-full bg-current" />
+                        {item.active ? "Active" : "Inactive"}
+                      </span>
+                    </div>
+                    <h3 className="mt-4 text-lg font-semibold wrap-break-word text-[#1F3A5F]">{item.name}</h3>
+                    <div className="mt-1 mb-4 space-y-1 text-sm text-slate-600">
+                      {isCampusCatalog ? (
+                        <p>{item.is_central ? "Central" : "Campus"}</p>
+                      ) : (
+                        <>
+                          {item.target_type && <p>{TARGET_TYPE_LABELS[item.target_type]}</p>}
+                          <p>{item.campus_name ?? (item.is_central ? "Central" : "University-wide")}</p>
+                        </>
+                      )}
+                    </div>
+                    <div className="mt-auto flex border-t border-slate-100 pt-3">
+                      <button
+                        type="button"
+                        aria-label={`${item.active ? "Deactivate" : "Activate"} ${item.name}`}
+                        onClick={() => toggleActive(item)}
+                        className="rounded-lg px-3 py-2 text-sm font-semibold text-teal-800 transition hover:bg-teal-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-teal-700"
+                      >
+                        {item.active ? "Deactivate" : "Activate"}
+                      </button>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </section>
+
+          <form onSubmit={submit} aria-labelledby="add-catalog-title" className="min-w-0 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+            <div className="border-b border-slate-200 bg-slate-50 px-5 py-4">
+              <h2 id="add-catalog-title" className="text-lg font-semibold text-[#1F3A5F]">{addLabel}</h2>
+            </div>
+            <div className="space-y-4 p-5">
+              {fields}
+              <button
+                type="submit"
+                disabled={saving}
+                className="mt-2 w-full rounded-xl bg-teal-700 px-4 py-3 text-sm font-semibold text-white transition hover:bg-teal-800 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-teal-700 disabled:cursor-not-allowed disabled:opacity-70"
+              >
+                {saving ? "Saving…" : addLabel}
+              </button>
+            </div>
+          </form>
+        </div>
+      </div>
+    );
+  }
+
+  const columns: [string, string][] = [
+    ["Name", "display_name"],
+    ["Account role", "role"],
+    ["Position/Role", "position_role"],
+    ["Assigned targets", "office_unit_name"],
+    ["Campus", "campus_name"],
+    ["Years of Service / Stay", "years_of_service"],
+  ];
 
   function displayValue(item: CatalogRow, key: string) {
     if (key === "is_central") return item.is_central ? "Central" : "Campus";
@@ -297,19 +425,15 @@ export default function CatalogPage({ kind }: { kind: CatalogKind }) {
           ? "Admin"
           : "Evaluator";
     }
-    if (key === "target_type") {
-      const targetType = item.target_type ?? item.office_type;
-      return targetType ? TARGET_TYPE_LABELS[targetType] : "—";
-    }
-    if (key === "campus_name" && kind === "targets") {
-      return item.campus_name ?? (item.is_central ? "Central" : "University-wide");
-    }
     if (key === "position_role") {
       return (
         ({
           teaching_faculty: "Teaching / Faculty",
           non_teaching_staff: "Non-Teaching / Administrative Staff",
           student_leader: "Student Leader",
+          campus_administrator_satellite_director: "Campus Administrator / Satellite College Director",
+          director: "Director",
+          vice_president: "Vice President",
         } as Record<string, string>)[item.position_role ?? ""] ?? "—"
       );
     }
@@ -326,58 +450,62 @@ export default function CatalogPage({ kind }: { kind: CatalogKind }) {
     return String(item[key as keyof CatalogRow] ?? "—");
   }
 
-  const submitLabel =
-    kind === "targets" ? "Add target" : kind === "users" ? "Add user" : `Add ${kind.slice(0, -1)}`;
+  function roleBadge(item: CatalogRow) {
+    const privileged = item.role === "admin" || item.role === "super_admin";
+    return (
+      <span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${
+        privileged ? "bg-indigo-50 text-indigo-800" : "bg-slate-100 text-slate-700"
+      }`}>
+        {displayValue(item, "role")}
+      </span>
+    );
+  }
+
+  function userStatus(item: CatalogRow) {
+    const action = item.active ? "Deactivate" : "Activate";
+    return (
+      <div className="flex flex-wrap items-center justify-end gap-2">
+        <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-semibold ring-1 ring-inset ${
+          item.active ? "bg-teal-50 text-teal-800 ring-teal-200" : "bg-slate-100 text-slate-700 ring-slate-200"
+        }`}>
+          <span aria-hidden="true" className="h-1.5 w-1.5 rounded-full bg-current" />
+          {item.active ? "Active" : "Inactive"}
+        </span>
+        <button
+          type="button"
+          aria-label={`${action} ${displayName(item)}`}
+          onClick={() => item.role === "evaluator" && item.active ? deactivateUser(item) : toggleActive(item)}
+          className="rounded-lg border border-slate-200 px-2.5 py-1.5 text-xs font-semibold text-slate-700 transition hover:border-teal-300 hover:bg-teal-50 hover:text-teal-900 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-teal-700"
+        >
+          {action}
+        </button>
+      </div>
+    );
+  }
 
   return (
-    <div className="space-y-8">
-      {/* Header */}
-      <header className="flex flex-col gap-2">
-        <div className="flex items-center gap-3">
-          <span className="inline-flex h-9 w-9 items-center justify-center rounded-xl bg-[#0F9D8A]/10 text-[#0F9D8A]">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-5 w-5">
-              <path strokeLinecap="round" strokeLinejoin="round" d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
-              <circle cx="9" cy="7" r="4" />
-              <path strokeLinecap="round" strokeLinejoin="round" d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75" />
-            </svg>
-          </span>
-          <h1 className="text-2xl font-bold tracking-tight text-[#1F3A5F]">{title}</h1>
-        </div>
-        {description && (
-          <p className="max-w-3xl text-sm leading-relaxed text-slate-600">{description}</p>
-        )}
-        {kind === "targets" && (
-          <p className="max-w-3xl text-sm leading-relaxed text-slate-600">
-            Manage the six target categories evaluated in each cycle. Campus Administrators and Satellite
-            College Directors must be linked to a campus.
-          </p>
-        )}
-      </header>
+    <div className="mx-auto max-w-7xl space-y-7">
+      <CatalogHeader title={title} description={description ?? ""} counts={counts} />
 
-      {/* Form card */}
       <form
         onSubmit={submit}
-        className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm ring-1 ring-slate-900/[0.02]"
+        aria-labelledby="create-account-title"
+        className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm"
       >
-        <h2 className="mb-5 text-sm font-semibold text-[#1F3A5F]">
-          {kind === "users"
-            ? "Create account"
-            : `Add ${kind === "targets" ? "target" : kind.slice(0, -1)}`}
-        </h2>
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">{fields}</div>
-        <div className="mt-6 flex justify-end">
-          <button
-            disabled={saving}
-            className="inline-flex items-center gap-2 rounded-xl bg-[#0F9D8A] px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-[#0c857a] disabled:cursor-not-allowed disabled:opacity-70"
-          >
-            {saving && (
-              <svg className="h-4 w-4 animate-spin" viewBox="0 0 24 24" fill="none">
-                <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" className="opacity-25" />
-                <path fill="currentColor" d="M4 12a8 8 0 0 1 8-8v4a4 4 0 0 0-4 4H4z" className="opacity-75" />
-              </svg>
-            )}
-            {saving ? "Saving…" : submitLabel}
-          </button>
+        <div className="border-b border-slate-200 bg-slate-50 px-5 py-4 sm:px-6">
+          <h2 id="create-account-title" className="text-lg font-semibold text-[#1F3A5F]">Create admin account</h2>
+        </div>
+        <div className="p-5 sm:p-6">
+          <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">{fields}</div>
+          <div className="mt-5 flex justify-end">
+            <button
+              type="submit"
+              disabled={saving}
+              className="w-full rounded-xl bg-teal-700 px-5 py-3 text-sm font-semibold text-white transition hover:bg-teal-800 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-teal-700 disabled:cursor-not-allowed disabled:opacity-70 sm:w-auto"
+            >
+              {saving ? "Saving…" : "Create account"}
+            </button>
+          </div>
         </div>
       </form>
 
@@ -398,16 +526,18 @@ export default function CatalogPage({ kind }: { kind: CatalogKind }) {
         </div>
       )}
 
-      {/* Table (desktop) / Cards (mobile) */}
-      <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm ring-1 ring-slate-900/[0.02]">
-        <div className="hidden overflow-x-auto md:block">
+      <section aria-labelledby="user-directory-title" className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+        <div className="border-b border-slate-200 px-5 py-4 sm:px-6">
+          <h2 id="user-directory-title" className="text-xl font-bold tracking-tight text-[#1F3A5F]">User directory</h2>
+        </div>
+        <div className="hidden overflow-x-auto xl:block">
           <table className="w-full text-left text-sm">
             <thead>
               <tr className="border-b border-slate-200 bg-slate-50/70 text-[11px] uppercase tracking-wide text-slate-500">
                 {columns.map(([label]) => (
-                  <th key={label} className="px-5 py-3.5 font-semibold">{label}</th>
+                  <th key={label} scope="col" className="px-5 py-3.5 font-semibold">{label}</th>
                 ))}
-                <th className="px-5 py-3.5 text-right font-semibold">Status</th>
+                <th scope="col" className="px-5 py-3.5 text-right font-semibold">Status &amp; access</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
@@ -436,35 +566,13 @@ export default function CatalogPage({ kind }: { kind: CatalogKind }) {
                             <span className="text-xs text-slate-500">{item.email}</span>
                           )}
                         </div>
-                      ) : (
+                      ) : key === "role" ? roleBadge(item) : (
                         displayValue(item, key)
                       )}
                     </td>
                   ))}
                   <td className="px-5 py-4 text-right">
-                    <div className="flex items-center justify-end gap-2">
-                      <button
-                        type="button"
-                        onClick={() => toggleActive(item)}
-                        className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-semibold transition ${
-                          item.active
-                            ? "bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200 hover:bg-emerald-100"
-                            : "bg-slate-100 text-slate-500 ring-1 ring-slate-200 hover:bg-slate-200"
-                        }`}
-                      >
-                        <span className={`h-1.5 w-1.5 rounded-full ${item.active ? "bg-emerald-500" : "bg-slate-400"}`} />
-                        {item.active ? "Active" : "Inactive"}
-                      </button>
-                      {kind === "users" && item.role === "evaluator" && item.active && (
-                        <button
-                          type="button"
-                          onClick={() => deactivateUser(item)}
-                          className="rounded-lg px-2.5 py-1 text-xs font-semibold text-amber-700 transition hover:bg-amber-50"
-                        >
-                          Deactivate
-                        </button>
-                      )}
-                    </div>
+                    {userStatus(item)}
                   </td>
                 </tr>
               ))}
@@ -472,56 +580,35 @@ export default function CatalogPage({ kind }: { kind: CatalogKind }) {
           </table>
         </div>
 
-        {/* Mobile cards */}
-        <div className="divide-y divide-slate-100 md:hidden">
+        <div className="grid gap-3 bg-slate-50 p-3 sm:grid-cols-2 xl:hidden">
           {loading && <p className="px-5 py-10 text-center text-sm text-slate-500">Loading…</p>}
           {!loading && items.length === 0 && (
             <p className="px-5 py-10 text-center text-sm text-slate-500">No records found.</p>
           )}
           {items.map((item) => (
-            <article key={item.id} className="space-y-3 p-5">
+            <article key={item.id} className="min-w-0 space-y-4 rounded-xl border border-slate-200 bg-white p-4">
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0">
-                  <h3 className="truncate text-sm font-semibold text-[#1F3A5F]">
-                    {kind === "users" ? displayName(item) : displayValue(item, columns[0][1])}
+                  <h3 className="wrap-break-word text-base font-semibold text-[#1F3A5F]">
+                    {displayName(item)}
                   </h3>
-                  {kind === "users" && item.email && (
-                    <p className="truncate text-xs text-slate-500">{item.email}</p>
+                  {item.email && (
+                    <p className="wrap-break-word text-xs text-slate-600">{item.email}</p>
                   )}
                 </div>
-                <button
-                  type="button"
-                  onClick={() => toggleActive(item)}
-                  className={`shrink-0 rounded-full px-2.5 py-1 text-[11px] font-semibold ${
-                    item.active
-                      ? "bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200"
-                      : "bg-slate-100 text-slate-500 ring-1 ring-slate-200"
-                  }`}
-                >
-                  {item.active ? "Active" : "Inactive"}
-                </button>
+                {roleBadge(item)}
               </div>
               <dl className="grid grid-cols-2 gap-x-4 gap-y-2 text-xs">
                 {columns
-                  .filter(([, key]) => key !== "display_name")
+                  .filter(([, key]) => key !== "display_name" && key !== "role")
                   .map(([label, key]) => (
                     <div key={label}>
-                      <dt className="font-semibold uppercase tracking-wide text-slate-400">{label}</dt>
+                      <dt className="font-semibold text-slate-600">{label}</dt>
                       <dd className="mt-0.5 text-slate-700">{displayValue(item, key)}</dd>
                     </div>
                   ))}
               </dl>
-              {kind === "users" && item.role === "evaluator" && item.active && (
-                <div className="pt-1">
-                  <button
-                    type="button"
-                    onClick={() => deactivateUser(item)}
-                    className="text-xs font-semibold text-amber-700 hover:underline"
-                  >
-                    Deactivate evaluator
-                  </button>
-                </div>
-              )}
+              <div className="border-t border-slate-100 pt-3">{userStatus(item)}</div>
             </article>
           ))}
         </div>
