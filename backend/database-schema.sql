@@ -88,6 +88,7 @@ CREATE TABLE targets (
     )
   ) STORED,
   campus_id INT NULL,
+  office_head_name VARCHAR(255) NULL,
   is_central TINYINT(1) NOT NULL DEFAULT 0,
   active TINYINT(1) NOT NULL DEFAULT 1,
   created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -130,7 +131,7 @@ CREATE TABLE users (
   password_hash VARCHAR(255) NOT NULL,
   first_name VARCHAR(100) NULL,
   last_name VARCHAR(100) NULL,
-  role ENUM('super_admin', 'evaluator') NOT NULL DEFAULT 'evaluator',
+  role ENUM('super_admin', 'evaluator', 'admin') NOT NULL DEFAULT 'evaluator',
   campus_id INT NULL,
   position_role ENUM('teaching_faculty', 'non_teaching_staff', 'student_leader') NULL,
   years_of_service ENUM('lt_1', '1_5', '6_10', '11_plus') NULL,
@@ -226,6 +227,34 @@ CREATE TABLE eval_cycles (
   created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   CONSTRAINT fk_eval_cycles_survey
     FOREIGN KEY (survey_id) REFERENCES surveys(id) ON DELETE RESTRICT
+);
+
+CREATE TABLE cycle_survey_snapshots (
+  cycle_id INT PRIMARY KEY,
+  survey_id INT NOT NULL,
+  survey_title VARCHAR(255) NOT NULL,
+  survey_description TEXT NULL,
+  CONSTRAINT fk_cycle_survey_snapshots_cycle
+    FOREIGN KEY (cycle_id) REFERENCES eval_cycles(id) ON DELETE CASCADE,
+  CONSTRAINT fk_cycle_survey_snapshots_survey
+    FOREIGN KEY (survey_id) REFERENCES surveys(id) ON DELETE RESTRICT
+);
+
+CREATE TABLE cycle_survey_questions (
+  cycle_id INT NOT NULL,
+  question_id INT NOT NULL,
+  section_id INT NOT NULL,
+  section_title VARCHAR(255) NOT NULL,
+  section_order INT NOT NULL,
+  question_order INT NOT NULL,
+  PRIMARY KEY (cycle_id, question_id),
+  KEY ix_cycle_survey_questions_order (cycle_id, section_order, question_order),
+  CONSTRAINT fk_cycle_survey_questions_cycle
+    FOREIGN KEY (cycle_id) REFERENCES eval_cycles(id) ON DELETE CASCADE,
+  CONSTRAINT fk_cycle_survey_questions_question
+    FOREIGN KEY (question_id) REFERENCES questions(id) ON DELETE RESTRICT,
+  CONSTRAINT fk_cycle_survey_questions_section
+    FOREIGN KEY (section_id) REFERENCES sections(id) ON DELETE RESTRICT
 );
 
 CREATE TABLE cycle_targets (

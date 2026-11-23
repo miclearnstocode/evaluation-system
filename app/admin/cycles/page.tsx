@@ -84,7 +84,7 @@ export default function AdminCyclesPage() {
         <div>
           <h1 className="text-2xl font-bold text-[#1F3A5F]">Evaluation Cycles</h1>
           <p className="mt-1 text-sm text-gray-500">
-            Each survey cycle includes all active evaluation targets. Evaluators only see targets they are eligible to evaluate.
+            Each survey cycle includes all active evaluation targets. Every evaluator can choose any target in an open cycle.
           </p>
         </div>
         {error && <p role="alert" className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</p>}

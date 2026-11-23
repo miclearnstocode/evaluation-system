@@ -52,12 +52,15 @@ def _cycle_user_eligible(
 
 
 def _registration_policy_allows(cursor: Any, user: dict[str, Any], target: dict[str, Any]) -> bool:
-    if not user.get("id") or not target.get("id"):
+    if user.get("position_role") != "teaching_faculty":
+        return True
+    target_id = target.get("id") or target.get("target_id")
+    if not user.get("id") or not target_id:
         return True
     assignment = fetch_one(
         cursor,
         "SELECT id FROM user_office_assignments WHERE user_id = %s AND target_id = %s",
-        (user["id"], target["id"]),
+        (user["id"], target_id),
     )
     return assignment is None
 

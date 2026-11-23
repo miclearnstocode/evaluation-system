@@ -35,7 +35,7 @@ type Results = {
   individual_responses?: IndividualResponse[];
 };
 
-export default function AdminResultsPage() {
+export default function SuperAdminResultsPage() {
   const [cycles, setCycles] = useState<Cycle[]>([]);
   const [targets, setTargets] = useState<Target[]>([]);
   const [cycleId, setCycleId] = useState("");
@@ -47,19 +47,16 @@ export default function AdminResultsPage() {
 
   useEffect(() => {
     let active = true;
-    Promise.all([
-      apiFetch<{ items: Cycle[] }>("/api/admin/cycles"),
-      apiFetch<{ items: Target[] }>("/api/admin/targets"),
-    ])
-      .then(([cycleData, targetData]) => {
+    apiFetch<{ cycles: Cycle[]; targets: Target[] }>("/api/admin/results/options")
+      .then((data) => {
         if (!active) return;
-        const availableCycles = cycleData.items.filter((cycle) => cycle.status === "open" || cycle.status === "closed");
+        const availableCycles = data.cycles;
         setCycles(availableCycles);
-        setTargets(targetData.items);
+        setTargets(data.targets);
         if (availableCycles.length) {
           const firstCycleId = String(availableCycles[0].id);
           setCycleId(firstCycleId);
-          const firstTarget = targetData.items.find((target) => availableCycles[0].target_ids.includes(target.id));
+          const firstTarget = data.targets.find((target) => availableCycles[0].target_ids.includes(target.id));
           setTargetId(firstTarget ? String(firstTarget.id) : "");
           setLoadingResults(Boolean(firstTarget));
         }

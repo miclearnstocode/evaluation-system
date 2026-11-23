@@ -43,7 +43,7 @@ type SurveyDetail = Survey & {
 };
 
 const fieldClassName =
-  "mt-1.5 block w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-800 outline-none focus:border-teal-600 focus:ring-2 focus:ring-teal-600/15";
+  "mt-1.5 block w-full rounded-xl border border-slate-300 bg-white px-3.5 py-2.5 text-sm text-slate-800 outline-none transition placeholder:text-slate-400 focus:border-teal-600 focus:ring-4 focus:ring-teal-600/10";
 
 function createQuestion(): QuestionDraft {
   return {
@@ -110,6 +110,37 @@ function displayScore(value: number): string {
   return Number(value.toFixed(2)).toString();
 }
 
+/* ---------------- Icons ---------------- */
+function PencilIcon({ className = "h-4 w-4" }: { className?: string }) {
+  return (
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className} aria-hidden="true">
+      <path d="M12 20h9" /><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4Z" />
+    </svg>
+  );
+}
+function CopyIcon({ className = "h-4 w-4" }: { className?: string }) {
+  return (
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className} aria-hidden="true">
+      <rect x="9" y="9" width="13" height="13" rx="2" ry="2" /><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+    </svg>
+  );
+}
+function TrashIcon({ className = "h-4 w-4" }: { className?: string }) {
+  return (
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className} aria-hidden="true">
+      <polyline points="3 6 5 6 21 6" /><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+    </svg>
+  );
+}
+function SendIcon({ className = "h-4 w-4" }: { className?: string }) {
+  return (
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className} aria-hidden="true">
+      <line x1="22" y1="2" x2="11" y2="13" /><polygon points="22 2 15 22 11 13 2 9 22 2" />
+    </svg>
+  );
+}
+
+/* ---------------- Preview ---------------- */
 function SurveyPreview({
   title,
   description,
@@ -121,64 +152,62 @@ function SurveyPreview({
 }) {
   return (
     <div className="mx-auto max-w-3xl space-y-5">
-      <section className="rounded-xl border border-slate-200 border-t-4 border-t-[#0F9D8A] bg-white p-6 shadow-sm sm:p-8">
-        <p className="text-xs font-semibold uppercase tracking-wide text-teal-800">Respondent preview</p>
-        <h2 className="mt-2 text-2xl font-bold text-[#1F3A5F]">{title || "Untitled survey"}</h2>
-        {description && <p className="mt-3 whitespace-pre-wrap text-sm leading-6 text-slate-600">{description}</p>}
+      <section className="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-lg shadow-slate-200/50">
+        <div className="relative overflow-hidden bg-gradient-to-br from-[#1F3A5F] via-[#1a4a5f] to-[#0F9D8A] px-6 py-7 text-white sm:px-8">
+          <div className="pointer-events-none absolute -right-16 -top-16 h-40 w-40 rounded-full bg-white/10 blur-2xl" aria-hidden="true" />
+          <div className="relative">
+            <span className="inline-flex items-center gap-2 rounded-full bg-white/10 px-3 py-1 text-xs font-semibold uppercase tracking-[0.14em] text-teal-100 ring-1 ring-white/20">
+              <span className="h-1.5 w-1.5 rounded-full bg-teal-300" aria-hidden="true" />
+              Respondent preview
+            </span>
+            <h2 className="mt-3 text-2xl font-bold tracking-tight">{title || "Untitled survey"}</h2>
+            {description && <p className="mt-3 whitespace-pre-wrap text-sm leading-6 text-teal-50/90">{description}</p>}
+          </div>
+        </div>
       </section>
       {sections.map((section, sectionIndex) => (
         <section key={section.id} className="space-y-4">
           {(sections.length > 1 || section.title) && (
-            <div className="rounded-xl border border-slate-200 bg-white px-6 py-4 shadow-sm">
-              <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Section {sectionIndex + 1}</p>
-              <h3 className="mt-1 text-lg font-semibold text-[#1F3A5F]">{section.title || "Untitled section"}</h3>
+            <div className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-white px-5 py-4 shadow-sm">
+              <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-[#1F3A5F] to-[#0F9D8A] text-xs font-bold text-white">
+                {sectionIndex + 1}
+              </span>
+              <div>
+                <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">Section {sectionIndex + 1}</p>
+                <h3 className="text-base font-semibold text-[#1F3A5F]">{section.title || "Untitled section"}</h3>
+              </div>
             </div>
           )}
           {section.questions.map((question, questionIndex) => (
-            <article key={question.id} className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
-              <h4 className="font-medium text-slate-800">
+            <article key={question.id} className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
+              <h4 className="text-[15px] font-semibold text-slate-800">
                 {question.text || `Question ${questionIndex + 1}`}
                 {question.required && <span className="ml-1 text-red-600" aria-label="required">*</span>}
               </h4>
               {question.type === "single_choice" || question.type === "multi_choice" ? (
-                <div className="mt-4 space-y-3">
+                <div className="mt-4 space-y-2.5">
                   {question.options.map((option, optionIndex) => (
-                    <label key={`${question.id}-preview-${optionIndex}`} className="flex items-center gap-3 text-sm text-slate-700">
-                      <input type={question.type === "single_choice" ? "radio" : "checkbox"} disabled />
+                    <label key={`${question.id}-preview-${optionIndex}`} className="flex items-center gap-3 rounded-xl border border-slate-200 px-3.5 py-2.5 text-sm text-slate-700">
+                      <input type={question.type === "single_choice" ? "radio" : "checkbox"} disabled className="h-4 w-4 accent-[#0F9D8A]" />
                       {option.label || `Option ${optionIndex + 1}`}
                     </label>
                   ))}
                 </div>
               ) : question.type === "yes_no" ? (
-                <div className="mt-4 flex gap-5">
+                <div className="mt-4 flex gap-3">
                   {["Yes", "No"].map((choice) => (
-                    <label key={choice} className="flex items-center gap-2 text-sm text-slate-700">
-                      <input type="radio" disabled />
-                      {choice}
-                    </label>
+                    <span key={choice} className="inline-flex min-w-24 justify-center rounded-xl border border-slate-200 px-6 py-2.5 text-sm text-slate-600">{choice}</span>
                   ))}
                 </div>
               ) : question.type === "text" ? (
-                <textarea
-                  disabled
-                  rows={3}
-                  placeholder="Long-answer text"
-                  className={`${fieldClassName} max-w-xl`}
-                />
+                <textarea disabled rows={3} placeholder="Long-answer text" className={`${fieldClassName} max-w-xl`} />
               ) : (
                 <div className="mt-4 max-w-xl">
-                  <div className="flex justify-between gap-4 text-xs text-slate-500">
+                  <div className="flex justify-between gap-4 text-xs font-medium text-slate-500">
                     <span>{question.minLabel || question.scaleMin}</span>
                     <span>{question.maxLabel || question.scaleMax}</span>
                   </div>
-                  <input
-                    type="range"
-                    min={question.scaleMin}
-                    max={question.scaleMax}
-                    disabled
-                    aria-label="Scale answer preview"
-                    className="mt-2 w-full accent-[#0F9D8A]"
-                  />
+                  <input type="range" min={question.scaleMin} max={question.scaleMax} disabled aria-label="Scale answer preview" className="mt-2 w-full accent-[#0F9D8A]" />
                 </div>
               )}
             </article>
@@ -196,11 +225,13 @@ export default function SurveyBuilderPage() {
   const [sections, setSections] = useState<SectionDraft[]>(initialSections);
   const [editingSurveyId, setEditingSurveyId] = useState<number | null>(null);
   const [loadingSurveyId, setLoadingSurveyId] = useState<number | null>(null);
+  const [busySurveyId, setBusySurveyId] = useState<number | null>(null);
   const [previewMode, setPreviewMode] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+
   const totalQuestions = sections.reduce((total, section) => total + section.questions.length, 0);
   const maximumScore = sections.reduce(
     (total, section) => total + section.questions.reduce((subtotal, question) => subtotal + questionMaximumScore(question), 0),
@@ -220,16 +251,16 @@ export default function SurveyBuilderPage() {
     setPreviewMode(false);
   }
 
-  async function editDraft(id: number) {
+  async function editSurvey(survey: Survey) {
     setError("");
     setNotice("");
-    setLoadingSurveyId(id);
+    setLoadingSurveyId(survey.id);
     try {
-      const survey = await apiFetch<SurveyDetail>(`/api/admin/surveys/${id}`);
-      setEditingSurveyId(id);
-      setTitle(survey.title);
-      setDescription(survey.description ?? "");
-      setSections(survey.sections.map((section) => ({
+      const detail = await apiFetch<SurveyDetail>(`/api/admin/surveys/${survey.id}`);
+      setEditingSurveyId(survey.id);
+      setTitle(detail.title);
+      setDescription(detail.description ?? "");
+      setSections(detail.sections.map((section) => ({
         id: crypto.randomUUID(),
         title: section.title,
         questions: section.questions.map((question) => ({
@@ -251,9 +282,68 @@ export default function SurveyBuilderPage() {
       setPreviewMode(false);
       document.getElementById("survey-editor")?.scrollIntoView({ behavior: "smooth", block: "start" });
     } catch (requestError) {
-      setError(requestError instanceof Error ? requestError.message : "The draft could not be opened.");
+      setError(requestError instanceof Error ? requestError.message : "The survey could not be opened for editing.");
     } finally {
       setLoadingSurveyId(null);
+    }
+  }
+
+  async function duplicateSurvey(survey: Survey) {
+    setError("");
+    setNotice("");
+    setBusySurveyId(survey.id);
+    try {
+      const detail = await apiFetch<SurveyDetail>(`/api/admin/surveys/${survey.id}`);
+      setEditingSurveyId(null);
+      setTitle(`${detail.title} (copy)`);
+      setDescription(detail.description ?? "");
+      setSections(detail.sections.map((section) => ({
+        id: crypto.randomUUID(),
+        title: section.title,
+        questions: section.questions.map((question) => ({
+          id: crypto.randomUUID(),
+          text: question.question_text,
+          type: question.type,
+          required: question.required,
+          options: question.options.map((option) => ({
+            label: option.label,
+            points: Number(option.points),
+          })),
+          scoreWeight: Number(question.score_weight ?? 1),
+          scaleMin: question.scale_min ?? 1,
+          scaleMax: question.scale_max ?? 5,
+          minLabel: question.min_label ?? "",
+          maxLabel: question.max_label ?? "",
+        })),
+      })));
+      setPreviewMode(false);
+      setNotice("Loaded a copy into the editor. Save it to create a new survey.");
+      document.getElementById("survey-editor")?.scrollIntoView({ behavior: "smooth", block: "start" });
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : "The survey could not be duplicated.");
+    } finally {
+      setBusySurveyId(null);
+    }
+  }
+
+  async function deleteSurvey(survey: Survey) {
+    if (!window.confirm(`Delete "${survey.title}"? This action cannot be undone.`)) return;
+    setError("");
+    setNotice("");
+    setBusySurveyId(survey.id);
+    try {
+      await apiFetch(`/api/admin/surveys/${survey.id}`, { method: "DELETE" });
+      setNotice("Survey deleted.");
+      if (editingSurveyId === survey.id) resetEditor();
+      try {
+        await loadSurveys();
+      } catch {
+        setError("The survey was deleted, but the survey list could not be refreshed.");
+      }
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : "The survey could not be deleted.");
+    } finally {
+      setBusySurveyId(null);
     }
   }
 
@@ -280,11 +370,7 @@ export default function SurveyBuilderPage() {
     );
   }
 
-  function updateQuestion(
-    sectionId: string,
-    questionId: string,
-    patch: Partial<QuestionDraft>,
-  ) {
+  function updateQuestion(sectionId: string, questionId: string, patch: Partial<QuestionDraft>) {
     setSections((current) =>
       current.map((section) => section.id !== sectionId ? section : {
         ...section,
@@ -344,12 +430,7 @@ export default function SurveyBuilderPage() {
     );
   }
 
-  function updateOption(
-    sectionId: string,
-    questionId: string,
-    optionIndex: number,
-    patch: Partial<ChoiceDraft>,
-  ) {
+  function updateOption(sectionId: string, questionId: string, optionIndex: number, patch: Partial<ChoiceDraft>) {
     setSections((current) =>
       current.map((section) => section.id !== sectionId ? section : {
         ...section,
@@ -399,12 +480,12 @@ export default function SurveyBuilderPage() {
           })),
         }),
       });
-      setNotice(editingSurveyId ? "Draft updated." : "Draft saved.");
+      setNotice(editingSurveyId ? "Survey updated." : "Draft saved.");
       resetEditor();
       try {
         await loadSurveys();
       } catch {
-        setError("The draft was saved, but the survey list could not be refreshed.");
+        setError("The survey was saved, but the survey list could not be refreshed.");
       }
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : "The survey could not be saved.");
@@ -413,12 +494,13 @@ export default function SurveyBuilderPage() {
     }
   }
 
-  async function performAction(id: number, action: "publish" | "clone") {
+  async function performAction(id: number) {
     setError("");
     setNotice("");
+    setBusySurveyId(id);
     try {
-      await apiFetch(`/api/admin/surveys/${id}/${action}`, { method: "POST" });
-      setNotice(action === "publish" ? "Survey published." : "Draft copy created.");
+      await apiFetch(`/api/admin/surveys/${id}/publish`, { method: "POST" });
+      setNotice("Survey published.");
       try {
         await loadSurveys();
       } catch {
@@ -426,23 +508,62 @@ export default function SurveyBuilderPage() {
       }
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : "The survey action failed.");
+    } finally {
+      setBusySurveyId(null);
     }
   }
 
+  const invalidScale = sections.some((section) =>
+    section.questions.some((question) =>
+      (question.type === "scale" || question.type === "rating") && question.scaleMin >= question.scaleMax,
+    ),
+  );
+
+  const actionBtn =
+    "inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs font-semibold transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-1 disabled:cursor-not-allowed disabled:opacity-50";
+
   return (
     <div className="space-y-7">
-      <div>
-        <p className="text-sm font-medium text-teal-800">Survey design</p>
-        <h1 className="mt-1 text-3xl font-bold tracking-tight text-[#1F3A5F]">Survey Builder</h1>
-        <p className="mt-2 text-sm text-slate-600">Build a survey, preview what evaluators will see, then save it as a draft or publish it.</p>
+      {/* Hero */}
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+        <div>
+          <p className="inline-flex items-center gap-1.5 rounded-full bg-teal-50 px-3 py-1 text-xs font-semibold uppercase tracking-[0.14em] text-teal-800 ring-1 ring-teal-600/15">
+            <span className="h-1.5 w-1.5 rounded-full bg-teal-500" aria-hidden="true" />
+            Survey design
+          </p>
+          <h1 className="mt-3 text-3xl font-bold tracking-tight text-[#1F3A5F] sm:text-4xl">Survey Builder</h1>
+          <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-600">
+            Create surveys and edit existing surveys in place. Drafts can be published when they are ready.
+          </p>
+        </div>
       </div>
 
-      {error && <p role="alert" className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</p>}
-      {notice && <p role="status" className="rounded-lg border border-teal-200 bg-teal-50 px-4 py-3 text-sm text-teal-800">{notice}</p>}
+      {error && (
+        <div role="alert" className="flex items-start gap-3 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="mt-0.5 h-5 w-5 shrink-0" aria-hidden="true">
+            <circle cx="12" cy="12" r="10" /><line x1="12" y1="8" x2="12" y2="12" /><line x1="12" y1="16" x2="12.01" y2="16" />
+          </svg>
+          <p>{error}</p>
+        </div>
+      )}
+      {notice && (
+        <div role="status" className="flex items-start gap-3 rounded-xl border border-teal-200 bg-teal-50 px-4 py-3 text-sm text-teal-800">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="mt-0.5 h-5 w-5 shrink-0" aria-hidden="true">
+            <polyline points="20 6 9 17 4 12" />
+          </svg>
+          <p>{notice}</p>
+        </div>
+      )}
 
-      <section id="survey-editor" className="flex flex-wrap items-center justify-between gap-4 rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+      {/* Editor header */}
+      <section
+        id="survey-editor"
+        className="flex flex-wrap items-center justify-between gap-4 rounded-3xl border border-slate-200 bg-white p-5 shadow-lg shadow-slate-200/50 sm:p-6"
+      >
         <div>
-          <h2 className="text-lg font-semibold text-[#1F3A5F]">{editingSurveyId ? "Edit draft" : "Create a survey"}</h2>
+          <h2 className="text-lg font-semibold text-[#1F3A5F]">
+            {editingSurveyId ? "Edit survey" : "Create a survey"}
+          </h2>
           <p className="mt-1 text-sm text-slate-500">
             {sections.length} sections · {totalQuestions} questions · {displayScore(maximumScore)} maximum points.
             {" "}Section scores sum question scores; mean = total ÷ section count.
@@ -450,7 +571,11 @@ export default function SurveyBuilderPage() {
         </div>
         <div className="flex flex-wrap gap-2">
           {editingSurveyId !== null && (
-            <button type="button" onClick={resetEditor} className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">
+            <button
+              type="button"
+              onClick={resetEditor}
+              className="rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
+            >
               Cancel editing
             </button>
           )}
@@ -458,7 +583,7 @@ export default function SurveyBuilderPage() {
             type="button"
             onClick={() => setPreviewMode((current) => !current)}
             aria-pressed={previewMode}
-            className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-semibold text-[#1F3A5F] hover:bg-slate-50"
+            className="rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-[#1F3A5F] transition hover:bg-slate-50"
           >
             {previewMode ? "Back to editor" : "Preview"}
           </button>
@@ -468,42 +593,44 @@ export default function SurveyBuilderPage() {
       {previewMode ? (
         <SurveyPreview title={title} description={description} sections={sections} />
       ) : (
-      <form onSubmit={createSurvey} className="space-y-6">
-        <section className="rounded-xl border border-slate-200 border-t-4 border-t-[#0F9D8A] bg-white p-5 shadow-sm sm:p-6">
-          <div className="grid gap-4">
-            <label className="text-sm font-medium text-slate-700">
-              Survey title
-              <input
-                required
-                maxLength={200}
-                value={title}
-                onChange={(event) => setTitle(event.target.value)}
-                placeholder="Untitled survey"
-                className={fieldClassName}
-              />
-            </label>
-            <label className="text-sm font-medium text-slate-700">
-              Description
-              <textarea
-                rows={2}
-                value={description}
-                onChange={(event) => setDescription(event.target.value)}
-                placeholder="Describe the purpose of this survey"
-                className={fieldClassName}
-              />
-            </label>
-          </div>
-        </section>
+        <form onSubmit={createSurvey} className="space-y-6">
+          {/* Title / description */}
+          <section className="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm">
+            <div className="h-1.5 bg-gradient-to-r from-[#1F3A5F] to-[#0F9D8A]" />
+            <div className="grid gap-4 p-5 sm:p-6">
+              <label className="text-sm font-semibold text-slate-700">
+                Survey title
+                <input
+                  required
+                  maxLength={200}
+                  value={title}
+                  onChange={(event) => setTitle(event.target.value)}
+                  placeholder="Untitled survey"
+                  className={fieldClassName}
+                />
+              </label>
+              <label className="text-sm font-semibold text-slate-700">
+                Description
+                <textarea
+                  rows={2}
+                  value={description}
+                  onChange={(event) => setDescription(event.target.value)}
+                  placeholder="Describe the purpose of this survey"
+                  className={fieldClassName}
+                />
+              </label>
+            </div>
+          </section>
 
-        {sections.map((section, sectionIndex) => (
-          <section key={section.id} className="space-y-4 rounded-xl border border-slate-200 bg-slate-100/70 p-4 sm:p-5">
-            <div className="rounded-xl border border-slate-200 border-l-4 border-l-[#1F3A5F] bg-white p-5 shadow-sm">
-              <div className="flex items-start gap-3">
-                <span className="mt-2 text-xs font-semibold uppercase tracking-wide text-slate-400">
-                  Section {sectionIndex + 1}
+          {sections.map((section, sectionIndex) => (
+            <section key={section.id} className="space-y-4 rounded-3xl border border-slate-200 bg-slate-100/70 p-4 sm:p-5">
+              {/* Section header */}
+              <div className="flex flex-wrap items-start gap-3 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-5">
+                <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-[#1F3A5F] to-[#0F9D8A] text-sm font-bold text-white shadow-sm">
+                  {sectionIndex + 1}
                 </span>
-                <label className="min-w-0 flex-1 text-sm font-medium text-slate-700">
-                  Section title
+                <label className="min-w-[12rem] flex-1 text-sm font-semibold text-slate-700">
+                  <span className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">Section title</span>
                   <input
                     required
                     maxLength={200}
@@ -512,343 +639,387 @@ export default function SurveyBuilderPage() {
                     className={fieldClassName}
                   />
                 </label>
-                <p className="mt-6 whitespace-nowrap text-xs font-medium text-slate-500">
+                <span className="mt-6 whitespace-nowrap rounded-full bg-teal-50 px-2.5 py-1 text-xs font-semibold text-teal-800 ring-1 ring-teal-600/15">
                   Max: {displayScore(section.questions.reduce(
                     (total, question) => total + questionMaximumScore(question),
                     0,
-                  ))} points
-                </p>
+                  ))} pts
+                </span>
                 {sections.length > 1 && (
                   <button
                     type="button"
                     onClick={() => setSections((current) => current.filter((item) => item.id !== section.id))}
                     aria-label={`Remove section ${sectionIndex + 1}`}
-                    className="mt-6 rounded-md px-2 py-1 text-sm font-medium text-red-700 hover:bg-red-50"
+                    className={`${actionBtn} mt-6 border-red-200 text-red-700 hover:bg-red-50`}
                   >
-                    Remove section
+                    <TrashIcon className="h-3.5 w-3.5" />
+                    Remove
                   </button>
                 )}
               </div>
-            </div>
 
-            {section.questions.map((question, questionIndex) => {
-              const isChoice = question.type === "single_choice" || question.type === "multi_choice";
-              const invalidScale = question.scaleMin >= question.scaleMax;
-              return (
-                <article key={question.id} className="rounded-xl border border-slate-200 border-l-4 border-l-teal-600 bg-white p-5 shadow-sm sm:p-6">
-                  <div className="grid gap-5 md:grid-cols-[minmax(0,1fr)_13rem]">
-                    <label className="text-sm font-medium text-slate-700">
-                      Question {questionIndex + 1}
-                      <input
-                        required
-                        maxLength={500}
-                        value={question.text}
-                        onChange={(event) => updateQuestion(section.id, question.id, { text: event.target.value })}
-                        placeholder="Write your question"
-                        className={fieldClassName}
-                      />
-                    </label>
-                    <label className="text-sm font-medium text-slate-700">
-                      Answer type
-                      <select
-                        value={question.type}
-                        onChange={(event) => updateQuestion(section.id, question.id, { type: event.target.value as QuestionType })}
-                        className={fieldClassName}
-                      >
-                        {questionTypes.map((type) => <option key={type.value} value={type.value}>{type.label}</option>)}
-                      </select>
-                    </label>
-                  </div>
+              {section.questions.map((question, questionIndex) => {
+                const isChoice = question.type === "single_choice" || question.type === "multi_choice";
+                const invalidScaleQuestion = question.scaleMin >= question.scaleMax;
+                return (
+                  <article key={question.id} className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
+                    <div className="grid gap-5 md:grid-cols-[minmax(0,1fr)_13rem]">
+                      <label className="text-sm font-semibold text-slate-700">
+                        Question {questionIndex + 1}
+                        <input
+                          required
+                          maxLength={500}
+                          value={question.text}
+                          onChange={(event) => updateQuestion(section.id, question.id, { text: event.target.value })}
+                          placeholder="Write your question"
+                          className={fieldClassName}
+                        />
+                      </label>
+                      <label className="text-sm font-semibold text-slate-700">
+                        Answer type
+                        <select
+                          value={question.type}
+                          onChange={(event) => updateQuestion(section.id, question.id, { type: event.target.value as QuestionType })}
+                          className={fieldClassName}
+                        >
+                          {questionTypes.map((type) => <option key={type.value} value={type.value}>{type.label}</option>)}
+                        </select>
+                      </label>
+                    </div>
 
-                  {isChoice && (
-                    <fieldset className="mt-5 space-y-3">
-                      <legend className="text-sm font-medium text-slate-700">
-                        Answer choices · selected choices contribute assigned points
-                      </legend>
-                      {question.options.map((option, optionIndex) => (
-                        <div key={`${question.id}-option-${optionIndex}`} className="flex items-center gap-3">
-                          <span aria-hidden="true" className={`h-4 w-4 shrink-0 border border-slate-400 ${
-                            question.type === "single_choice" ? "rounded-full" : "rounded-sm"
-                          }`} />
-                          <input
-                            required
-                            maxLength={200}
-                            value={option.label}
-                            onChange={(event) => updateOption(section.id, question.id, optionIndex, { label: event.target.value })}
-                            aria-label={`Choice ${optionIndex + 1}`}
-                            className="min-w-0 flex-1 border-0 border-b border-slate-200 px-1 py-2 text-sm outline-none focus:border-teal-600"
-                          />
-                          <label className="w-24 shrink-0 text-xs font-medium text-slate-600">
-                            Points
+                    {isChoice && (
+                      <fieldset className="mt-5 space-y-3 rounded-xl border border-slate-100 bg-slate-50/60 p-4">
+                        <legend className="px-1 text-sm font-semibold text-slate-700">
+                          Answer choices · selected choices contribute assigned points
+                        </legend>
+                        {question.options.map((option, optionIndex) => (
+                          <div key={`${question.id}-option-${optionIndex}`} className="flex items-center gap-3">
+                            <span aria-hidden="true" className={`h-4 w-4 shrink-0 border-2 border-slate-400 ${
+                              question.type === "single_choice" ? "rounded-full" : "rounded"
+                            }`} />
+                            <input
+                              required
+                              maxLength={200}
+                              value={option.label}
+                              onChange={(event) => updateOption(section.id, question.id, optionIndex, { label: event.target.value })}
+                              aria-label={`Choice ${optionIndex + 1}`}
+                              className="min-w-0 flex-1 rounded-lg border-0 border-b border-slate-200 bg-transparent px-1 py-2 text-sm outline-none transition focus:border-teal-600"
+                            />
+                            <label className="w-24 shrink-0 text-xs font-semibold text-slate-600">
+                              Points
+                              <input
+                                type="number"
+                                min={0}
+                                max={10000}
+                                step={0.01}
+                                value={option.points}
+                                onChange={(event) => updateOption(
+                                  section.id,
+                                  question.id,
+                                  optionIndex,
+                                  { points: Number(event.target.value) },
+                                )}
+                                aria-label={`Points for choice ${optionIndex + 1}`}
+                                className={fieldClassName}
+                              />
+                            </label>
+                            {question.options.length > 1 && (
+                              <button
+                                type="button"
+                                onClick={() => updateQuestion(section.id, question.id, {
+                                  options: question.options.filter((_, index) => index !== optionIndex),
+                                })}
+                                aria-label={`Remove choice ${optionIndex + 1}`}
+                                className="rounded-lg p-1.5 text-slate-500 transition hover:bg-red-50 hover:text-red-700"
+                              >
+                                <TrashIcon className="h-3.5 w-3.5" />
+                              </button>
+                            )}
+                          </div>
+                        ))}
+                        <button
+                          type="button"
+                          onClick={() => updateQuestion(section.id, question.id, {
+                            options: [
+                              ...question.options,
+                              { label: `Option ${question.options.length + 1}`, points: 1 },
+                            ],
+                          })}
+                          className="ml-7 inline-flex items-center gap-1 text-sm font-semibold text-teal-800 hover:underline"
+                        >
+                          + Add choice
+                        </button>
+                      </fieldset>
+                    )}
+
+                    {(question.type === "scale" || question.type === "rating") && (
+                      <div className="mt-5 space-y-4 rounded-xl border border-slate-100 bg-slate-50/60 p-4">
+                        <p className="text-sm font-semibold text-slate-700">
+                          {question.type === "scale" ? "Scale range" : "Rating range"}
+                        </p>
+                        <div className="grid gap-4 sm:grid-cols-2">
+                          <label className="text-xs font-semibold text-slate-600">
+                            Starts at
                             <input
                               type="number"
-                              min={0}
-                              max={10000}
-                              step={0.01}
-                              value={option.points}
-                              onChange={(event) => updateOption(
-                                section.id,
-                                question.id,
-                                optionIndex,
-                                { points: Number(event.target.value) },
-                              )}
-                              aria-label={`Points for choice ${optionIndex + 1}`}
+                              value={question.scaleMin}
+                              onChange={(event) => updateQuestion(section.id, question.id, { scaleMin: Number(event.target.value) })}
                               className={fieldClassName}
                             />
                           </label>
-                          {question.options.length > 1 && (
-                            <button
-                              type="button"
-                              onClick={() => updateQuestion(section.id, question.id, {
-                                options: question.options.filter((_, index) => index !== optionIndex),
-                              })}
-                              aria-label={`Remove choice ${optionIndex + 1}`}
-                              className="rounded p-1 text-lg leading-none text-slate-500 hover:bg-slate-100 hover:text-red-700"
-                            >
-                              ×
-                            </button>
-                          )}
+                          <label className="text-xs font-semibold text-slate-600">
+                            Ends at
+                            <input
+                              type="number"
+                              value={question.scaleMax}
+                              onChange={(event) => updateQuestion(section.id, question.id, { scaleMax: Number(event.target.value) })}
+                              className={fieldClassName}
+                            />
+                          </label>
+                          <label className="text-xs font-semibold text-slate-600">
+                            Start label (optional)
+                            <input
+                              maxLength={60}
+                              value={question.minLabel}
+                              onChange={(event) => updateQuestion(section.id, question.id, { minLabel: event.target.value })}
+                              placeholder="Not satisfied"
+                              className={fieldClassName}
+                            />
+                          </label>
+                          <label className="text-xs font-semibold text-slate-600">
+                            End label (optional)
+                            <input
+                              maxLength={60}
+                              value={question.maxLabel}
+                              onChange={(event) => updateQuestion(section.id, question.id, { maxLabel: event.target.value })}
+                              placeholder="Very satisfied"
+                              className={fieldClassName}
+                            />
+                          </label>
                         </div>
-                      ))}
-                      <button
-                        type="button"
-                        onClick={() => updateQuestion(section.id, question.id, {
-                          options: [
-                            ...question.options,
-                            { label: `Option ${question.options.length + 1}`, points: 1 },
-                          ],
-                        })}
-                        className="ml-7 text-sm font-semibold text-teal-800 hover:underline"
-                      >
-                        Add choice
-                      </button>
-                    </fieldset>
-                  )}
-
-                  {(question.type === "scale" || question.type === "rating") && (
-                    <div className="mt-5 space-y-4 rounded-lg bg-slate-50 p-4">
-                      <p className="text-sm font-medium text-slate-700">
-                        {question.type === "scale" ? "Scale range" : "Rating range"}
-                      </p>
-                      <div className="grid gap-4 sm:grid-cols-2">
-                        <label className="text-xs font-medium text-slate-600">
-                          Starts at
+                        <label className="block max-w-xs text-xs font-semibold text-slate-600">
+                          Score multiplier
                           <input
                             type="number"
-                            value={question.scaleMin}
-                            onChange={(event) => updateQuestion(section.id, question.id, { scaleMin: Number(event.target.value) })}
+                            min={0}
+                            max={10000}
+                            step={0.01}
+                            value={question.scoreWeight}
+                            onChange={(event) => updateQuestion(
+                              section.id,
+                              question.id,
+                              { scoreWeight: Number(event.target.value) },
+                            )}
                             className={fieldClassName}
                           />
                         </label>
-                        <label className="text-xs font-medium text-slate-600">
-                          Ends at
+                        <p className="text-xs text-slate-500">Score = selected value × multiplier.</p>
+                        {invalidScaleQuestion && (
+                          <p role="alert" className="text-sm font-medium text-red-700">The end of the scale must be greater than its start.</p>
+                        )}
+                      </div>
+                    )}
+
+                    {question.type === "text" && (
+                      <div className="mt-5 rounded-xl border border-dashed border-slate-300 bg-slate-50 px-4 py-5 text-sm text-slate-500">
+                        Long-answer text response
+                      </div>
+                    )}
+                    {question.type === "yes_no" && (
+                      <div className="mt-5 space-y-3 rounded-xl border border-slate-100 bg-slate-50/60 p-4">
+                        <div className="flex gap-3">
+                          {["Yes", "No"].map((choice) => (
+                            <span key={choice} className="rounded-full border border-slate-300 bg-white px-4 py-1.5 text-sm text-slate-600">{choice}</span>
+                          ))}
+                        </div>
+                        <label className="block max-w-xs text-xs font-semibold text-slate-600">
+                          Yes score multiplier
                           <input
                             type="number"
-                            value={question.scaleMax}
-                            onChange={(event) => updateQuestion(section.id, question.id, { scaleMax: Number(event.target.value) })}
+                            min={0}
+                            max={10000}
+                            step={0.01}
+                            value={question.scoreWeight}
+                            onChange={(event) => updateQuestion(
+                              section.id,
+                              question.id,
+                              { scoreWeight: Number(event.target.value) },
+                            )}
                             className={fieldClassName}
                           />
                         </label>
-                        <label className="text-xs font-medium text-slate-600">
-                          Start label (optional)
-                          <input
-                            maxLength={60}
-                            value={question.minLabel}
-                            onChange={(event) => updateQuestion(section.id, question.id, { minLabel: event.target.value })}
-                            placeholder="Not satisfied"
-                            className={fieldClassName}
-                          />
-                        </label>
-                        <label className="text-xs font-medium text-slate-600">
-                          End label (optional)
-                          <input
-                            maxLength={60}
-                            value={question.maxLabel}
-                            onChange={(event) => updateQuestion(section.id, question.id, { maxLabel: event.target.value })}
-                            placeholder="Very satisfied"
-                            className={fieldClassName}
-                          />
-                        </label>
+                        <p className="text-xs text-slate-500">Yes = multiplier; No = 0.</p>
                       </div>
-                      <label className="block max-w-xs text-xs font-medium text-slate-600">
-                        Score multiplier
-                        <input
-                          type="number"
-                          min={0}
-                          max={10000}
-                          step={0.01}
-                          value={question.scoreWeight}
-                          onChange={(event) => updateQuestion(
-                            section.id,
-                            question.id,
-                            { scoreWeight: Number(event.target.value) },
-                          )}
-                          className={fieldClassName}
-                        />
-                      </label>
-                      <p className="text-xs text-slate-500">Score = selected value × multiplier.</p>
-                      {invalidScale && (
-                        <p role="alert" className="text-sm text-red-700">The end of the scale must be greater than its start.</p>
-                      )}
-                    </div>
-                  )}
+                    )}
 
-                  {question.type === "text" && (
-                    <div className="mt-5 rounded-lg border border-dashed border-slate-300 bg-slate-50 px-4 py-5 text-sm text-slate-500">
-                      Long-answer text response
-                    </div>
-                  )}
-                  {question.type === "yes_no" && (
-                    <div className="mt-5 space-y-3">
-                      <div className="flex gap-3">
-                        {["Yes", "No"].map((choice) => (
-                          <span key={choice} className="rounded-full border border-slate-300 px-4 py-2 text-sm text-slate-600">{choice}</span>
-                        ))}
+                    {/* Question footer */}
+                    <div className="mt-5 flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 pt-4">
+                      <label className="flex items-center gap-2 text-sm text-slate-700">
+                        <input
+                          type="checkbox"
+                          checked={question.required}
+                          onChange={(event) => updateQuestion(section.id, question.id, { required: event.target.checked })}
+                          className="h-4 w-4 rounded accent-[#0F9D8A]"
+                        />
+                        Required
+                      </label>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => moveQuestion(section.id, question.id, -1)}
+                          disabled={questionIndex === 0}
+                          className={`${actionBtn} border-slate-200 text-slate-600 hover:bg-slate-50`}
+                        >
+                          ↑ Up
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => moveQuestion(section.id, question.id, 1)}
+                          disabled={questionIndex === section.questions.length - 1}
+                          className={`${actionBtn} border-slate-200 text-slate-600 hover:bg-slate-50`}
+                        >
+                          ↓ Down
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => duplicateQuestion(section.id, question.id)}
+                          className={`${actionBtn} border-slate-200 text-teal-800 hover:bg-teal-50`}
+                        >
+                          <CopyIcon className="h-3.5 w-3.5" />
+                          Duplicate
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => removeQuestion(section.id, question.id)}
+                          disabled={totalQuestions <= 1}
+                          className={`${actionBtn} border-red-200 text-red-700 hover:bg-red-50`}
+                        >
+                          <TrashIcon className="h-3.5 w-3.5" />
+                          Delete
+                        </button>
                       </div>
-                      <label className="block max-w-xs text-xs font-medium text-slate-600">
-                        Yes score multiplier
-                        <input
-                          type="number"
-                          min={0}
-                          max={10000}
-                          step={0.01}
-                          value={question.scoreWeight}
-                          onChange={(event) => updateQuestion(
-                            section.id,
-                            question.id,
-                            { scoreWeight: Number(event.target.value) },
-                          )}
-                          className={fieldClassName}
-                        />
-                      </label>
-                      <p className="text-xs text-slate-500">Yes = multiplier; No = 0.</p>
                     </div>
-                  )}
+                  </article>
+                );
+              })}
 
-                  <div className="mt-5 flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 pt-4">
-                    <label className="flex items-center gap-2 text-sm text-slate-700">
-                      <input
-                        type="checkbox"
-                        checked={question.required}
-                        onChange={(event) => updateQuestion(section.id, question.id, { required: event.target.checked })}
-                        className="h-4 w-4 accent-[#0F9D8A]"
-                      />
-                      Required
-                    </label>
-                    <div className="flex flex-wrap items-center gap-3">
-                      <button
-                        type="button"
-                        onClick={() => moveQuestion(section.id, question.id, -1)}
-                        disabled={questionIndex === 0}
-                        className="text-sm font-medium text-slate-600 hover:text-[#1F3A5F] disabled:cursor-not-allowed disabled:opacity-40"
-                      >
-                        Move up
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => moveQuestion(section.id, question.id, 1)}
-                        disabled={questionIndex === section.questions.length - 1}
-                        className="text-sm font-medium text-slate-600 hover:text-[#1F3A5F] disabled:cursor-not-allowed disabled:opacity-40"
-                      >
-                        Move down
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => duplicateQuestion(section.id, question.id)}
-                        className="text-sm font-semibold text-teal-800 hover:underline"
-                      >
-                        Duplicate
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => removeQuestion(section.id, question.id)}
-                        disabled={totalQuestions <= 1}
-                        className="text-sm font-semibold text-red-700 hover:underline disabled:cursor-not-allowed disabled:opacity-40"
-                      >
-                        Delete
-                      </button>
-                    </div>
-                  </div>
-                </article>
-              );
-            })}
+              <button
+                type="button"
+                onClick={() => addQuestion(section.id)}
+                className="w-full rounded-2xl border border-dashed border-slate-300 bg-white px-4 py-3 text-sm font-semibold text-teal-800 transition hover:border-teal-500 hover:bg-teal-50/50"
+              >
+                + Add question
+              </button>
+            </section>
+          ))}
 
+          <div className="flex flex-wrap items-center justify-between gap-3">
             <button
               type="button"
-              onClick={() => addQuestion(section.id)}
-              className="w-full rounded-xl border border-dashed border-slate-300 bg-white px-4 py-3 text-sm font-semibold text-teal-800 transition hover:border-teal-500 hover:bg-teal-50/50"
+              onClick={addSection}
+              className="rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-sm font-semibold text-[#1F3A5F] transition hover:bg-slate-50"
             >
-              + Add question
+              + Add section
             </button>
-          </section>
-        ))}
-
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <button
-            type="button"
-            onClick={addSection}
-            className="rounded-lg border border-slate-300 bg-white px-4 py-2.5 text-sm font-semibold text-[#1F3A5F] hover:bg-slate-50"
-          >
-            + Add section
-          </button>
-          <button
-            type="submit"
-            disabled={saving || sections.some((section) => section.questions.some((question) =>
-              (question.type === "scale" || question.type === "rating") && question.scaleMin >= question.scaleMax,
-            ))}
-            className="rounded-lg bg-[#0F9D8A] px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-[#0C8575] disabled:cursor-not-allowed disabled:opacity-60"
-          >
-            {saving ? "Saving…" : editingSurveyId ? "Update draft" : "Save draft"}
-          </button>
-        </div>
-      </form>
+            <button
+              type="submit"
+              disabled={saving || invalidScale}
+              className="rounded-xl bg-gradient-to-r from-[#0F9D8A] to-[#0C8575] px-5 py-2.5 text-sm font-semibold text-white shadow-md shadow-teal-600/20 transition hover:shadow-teal-600/30 disabled:cursor-not-allowed disabled:opacity-60 disabled:shadow-none"
+            >
+              {saving ? "Saving…" : editingSurveyId ? "Update survey" : "Save draft"}
+            </button>
+          </div>
+        </form>
       )}
 
-      <section className="overflow-x-auto rounded-xl border border-slate-200 bg-white shadow-sm">
-        <div className="border-b border-slate-200 px-5 py-4">
+      {/* Saved surveys (card list) */}
+      <section className="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm">
+        <div className="flex items-center justify-between border-b border-slate-200 px-5 py-4">
           <h2 className="font-semibold text-[#1F3A5F]">Saved surveys</h2>
+          {!loading && surveys.length > 0 && (
+            <span className="rounded-full bg-slate-100 px-2.5 py-0.5 text-xs font-semibold text-slate-600">
+              {surveys.length}
+            </span>
+          )}
         </div>
-        <table className="w-full text-left text-sm">
-          <thead>
-            <tr className="bg-slate-50 text-[#1F3A5F]">
-              <th className="px-5 py-4 font-semibold">Survey</th>
-              <th className="px-5 py-4 font-semibold">Version</th>
-              <th className="px-5 py-4 font-semibold">Status</th>
-              <th className="px-5 py-4 text-right font-semibold">Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            {loading && <tr><td className="px-5 py-5 text-slate-500" colSpan={4}>Loading surveys…</td></tr>}
-            {!loading && surveys.length === 0 && <tr><td className="px-5 py-5 text-slate-500" colSpan={4}>No surveys created.</td></tr>}
-            {surveys.map((survey) => (
-              <tr key={survey.id} className="border-t border-slate-100">
-                <td className="px-5 py-4 font-medium text-slate-800">{survey.title}</td>
-                <td className="px-5 py-4 text-slate-600">v{survey.version}</td>
-                <td className="px-5 py-4 capitalize text-slate-600">{survey.status}</td>
-                <td className="px-5 py-4 text-right">
-                  {survey.status === "draft" && (
-                    <>
+
+        {loading ? (
+          <p className="px-5 py-6 text-sm text-slate-500">Loading surveys…</p>
+        ) : surveys.length === 0 ? (
+          <p className="px-5 py-6 text-sm text-slate-500">No surveys created.</p>
+        ) : (
+          <ul className="divide-y divide-slate-100">
+            {surveys.map((survey) => {
+              const busy = busySurveyId === survey.id;
+              const statusStyle =
+                survey.status === "published"
+                  ? "bg-teal-50 text-teal-700 ring-teal-600/20"
+                  : survey.status === "archived"
+                    ? "bg-slate-100 text-slate-600 ring-slate-400/20"
+                    : "bg-amber-50 text-amber-800 ring-amber-500/20";
+              return (
+                <li key={survey.id} className="flex flex-col gap-3 px-5 py-4 transition hover:bg-slate-50/60 sm:flex-row sm:items-center sm:justify-between">
+                  <div className="min-w-0">
+                    <p className="truncate font-semibold text-slate-800">{survey.title}</p>
+                    <div className="mt-1.5 flex flex-wrap items-center gap-2 text-xs text-slate-500">
+                      <span className="rounded bg-slate-100 px-1.5 py-0.5 font-medium">v{survey.version}</span>
+                      <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 font-semibold capitalize ring-1 ${statusStyle}`}>
+                        <span
+                          className={`h-1.5 w-1.5 rounded-full ${
+                            survey.status === "published" ? "bg-teal-500" : survey.status === "archived" ? "bg-slate-400" : "bg-amber-500"
+                          }`}
+                          aria-hidden="true"
+                        />
+                        {survey.status}
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="flex flex-wrap items-center gap-2">
+                    <button
+                      type="button"
+                      disabled={loadingSurveyId !== null || busy}
+                      onClick={() => editSurvey(survey)}
+                      className={`${actionBtn} border-[#1F3A5F]/20 text-[#1F3A5F] hover:bg-slate-100`}
+                    >
+                      <PencilIcon className="h-3.5 w-3.5" />
+                      {loadingSurveyId === survey.id ? "Opening…" : "Edit"}
+                    </button>
+                    <button
+                      type="button"
+                      disabled={busy || loadingSurveyId !== null}
+                      onClick={() => duplicateSurvey(survey)}
+                      className={`${actionBtn} border-teal-600/20 text-teal-800 hover:bg-teal-50`}
+                    >
+                      <CopyIcon className="h-3.5 w-3.5" />
+                      Duplicate
+                    </button>
+                    {survey.status === "draft" && (
                       <button
                         type="button"
-                        disabled={loadingSurveyId !== null}
-                        onClick={() => editDraft(survey.id)}
-                        className="mr-3 font-semibold text-[#1F3A5F] hover:underline disabled:opacity-50"
+                        disabled={busy}
+                        onClick={() => performAction(survey.id)}
+                        className={`${actionBtn} border-teal-600/20 text-teal-800 hover:bg-teal-50`}
                       >
-                        {loadingSurveyId === survey.id ? "Opening…" : "Edit"}
+                        <SendIcon className="h-3.5 w-3.5" />
+                        {busy ? "Working…" : "Publish"}
                       </button>
-                      <button type="button" onClick={() => performAction(survey.id, "publish")} className="mr-3 font-semibold text-teal-800 hover:underline">
-                        Publish
-                      </button>
-                    </>
-                  )}
-                  <button type="button" onClick={() => performAction(survey.id, "clone")} className="font-semibold text-[#1F3A5F] hover:underline">
-                    Clone
-                  </button>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+                    )}
+                    <button
+                      type="button"
+                      disabled={busy}
+                      onClick={() => deleteSurvey(survey)}
+                      className={`${actionBtn} border-red-200 text-red-700 hover:bg-red-50`}
+                    >
+                      <TrashIcon className="h-3.5 w-3.5" />
+                      Delete
+                    </button>
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
+        )}
       </section>
     </div>
   );

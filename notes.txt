@@ -33,7 +33,7 @@ nohup venv/bin/python3 venv/bin/gunicorn 'app:create_app()' \
 
 #generalservices_admin
 GSUcapsu2026
-
+Hyber62n@te11
 
 #!/bin/bash
 

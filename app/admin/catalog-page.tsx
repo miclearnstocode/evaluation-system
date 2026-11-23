@@ -105,7 +105,7 @@ export default function CatalogPage({ kind }: { kind: CatalogKind }) {
       body = {
         email: form.email ?? "",
         password: form.password ?? "",
-        role: "super_admin",
+        role: form.role ?? "",
       };
     }
 
@@ -190,18 +190,28 @@ export default function CatalogPage({ kind }: { kind: CatalogKind }) {
             select("campus_id", requiredCampusTarget ? "Campus (required for this target type)" : "Campus (optional)", campusChoices, requiredCampusTarget),
             select("is_central", "Scope (optional)", [{ value: "true", label: "Central" }, { value: "false", label: "Not central" }], false),
           ]
-          : [input("email", "Super admin email", true, "email"), input("password", "Initial password (at least 12 characters)", true, "password")];
+          : [
+              select("role", "Account role", [
+                { value: "admin", label: "Admin (office total mean only)" },
+                { value: "super_admin", label: "Super admin (full system access)" },
+              ]),
+              input("email", "Administrator email", true, "email"),
+              input("password", "Initial password (at least 12 characters)", true, "password"),
+            ];
 
   const columns =
     kind === "campuses"
       ? [["Code", "code"], ["Name", "name"], ["Type", "is_central"]]
       : kind === "targets"
         ? [["Target", "name"], ["Type", "target_type"], ["Campus / Scope", "campus_name"]]
-        : [["Email", "email"], ["Position/Role", "position_role"], ["Assigned targets", "office_unit_name"], ["Campus", "campus_name"], ["Years of Service / Stay", "years_of_service"]];
+        : [["Email", "email"], ["Account role", "role"], ["Position/Role", "position_role"], ["Assigned targets", "office_unit_name"], ["Campus", "campus_name"], ["Years of Service / Stay", "years_of_service"]];
 
   function displayValue(item: CatalogRow, key: string) {
     if (key === "is_central") return item.is_central ? "Central" : "Campus";
     if (key === "is_central_staff") return item.is_central_staff ? "Yes" : "No";
+    if (key === "role") {
+      return item.role === "super_admin" ? "Super admin" : item.role === "admin" ? "Admin" : "Evaluator";
+    }
     if (key === "target_type") {
       const targetType = item.target_type ?? item.office_type;
       return targetType ? TARGET_TYPE_LABELS[targetType] : "—";
@@ -232,7 +242,7 @@ export default function CatalogPage({ kind }: { kind: CatalogKind }) {
               <h1 className="text-2xl font-bold text-[#1F3A5F]">{title}</h1>
               {kind === "users" && (
                 <p className="text-sm text-gray-600">
-                  Evaluator accounts are active immediately after registration. Delete accounts that are no longer affiliated with CAPSU; deletion also retracts their submissions and comments.
+                  Create admin accounts for office-level mean scores only, or super-admin accounts for full evaluator scores and system management. Delete evaluator accounts to retract their submissions and comments.
                 </p>
               )}
               {kind === "targets" && (

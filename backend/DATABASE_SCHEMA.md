@@ -5,6 +5,9 @@ It targets MySQL 8.0.16 or later for enforced `CHECK` constraints. This
 reference describes the relationships and the backend's use of the tables.
 The DDL creates the `evaluation_system` database; it is not an in-place
 migration for an existing database.
+For an existing database, apply
+[20261123_cycle_survey_snapshots.sql](./migrations/20261123_cycle_survey_snapshots.sql)
+before deploying the snapshot-aware backend.
 
 ## Relationship diagram
 
@@ -29,6 +32,10 @@ erDiagram
     sections ||--o{ questions : section_id
     questions ||--o{ question_options : question_id
     surveys ||--o{ eval_cycles : survey_id
+    eval_cycles ||--|| cycle_survey_snapshots : cycle_id
+    eval_cycles ||--o{ cycle_survey_questions : cycle_id
+    questions ||--o{ cycle_survey_questions : question_id
+    sections ||--o{ cycle_survey_questions : section_id
     eval_cycles ||--o{ cycle_targets : cycle_id
     targets ||--o{ cycle_targets : target_id
     eval_cycles ||--o{ eligibility_rules : cycle_id
@@ -70,21 +77,23 @@ the DDL enforces the type/reference match and each reference has a foreign key.
 | `directors` | General director targets not tied to a campus-specific director type. |
 | `rde_directors` | Research, Development, and Extension director targets. |
 | `rde_center_directors` | Director targets for individual RDE centers. |
-| `targets` | Common evaluation target registry. A target points to exactly one of the six target-specific tables, with optional campus, central, and active flags. Cycles, assignments, participation, and aggregate results reference it. |
-| `users` | Super-admin and evaluator accounts, authentication, campus, registration role, service range, and active status. |
-| `user_office_assignments` | Many-to-many links between users and targets, with `head` or `member` assignment role. An evaluator is not eligible to evaluate a target to which they are assigned. |
+| `targets` | Common evaluation target registry. A target points to exactly one of the six target-specific tables, with optional campus, central, and active flags, and an optional `office_head_name` holding the name of the designated office head being evaluated (for example, `Dr. Leo Andrew B. Biclar`; officers-in-charge are stored with an `(OIC)` suffix). The name is plain text, not a link to a user account, and one person can head more than one office. Cycles, assignments, participation, and aggregate results reference it. |
+| `users` | Super-admin, admin, and evaluator accounts, authentication, campus, registration role, service range, and active status. Admin accounts manage the system and can view aggregate office means. Super admins are results-only and can access evaluator-level means and detailed results, but cannot manage system configuration or submissions. |
+| `user_office_assignments` | Many-to-many links between users and targets, with `head` or `member` assignment role. Assignments are retained for account records but do not restrict evaluator access. |
 
 ### Surveys and evaluation setup
 
 | Table | Purpose and connections |
 |---|---|
 | `surveys` | Survey title, description, version, and draft/published/archived state. Owns sections and questions and is selected by cycles. |
-| `sections` | Ordered groupings of questions within a survey. Deleting a survey cascades to its sections and questions. |
-| `questions` | Survey prompts, type, required/scale settings, order, scoring weight, and archive state. Belongs to a survey and section. |
+| `sections` | Ordered groupings of questions within a survey. Prior section rows are retained when a survey is edited so cycle snapshots can refer to their original content. |
+| `questions` | Survey prompts, type, required/scale settings, order, scoring weight, and archive state. Belongs to a survey and section. Editing archives prior questions instead of deleting answer-linked rows. |
 | `question_options` | Ordered choices and their scoring points for choice questions. `option_key` is unique within a question. |
 | `eval_cycles` | Survey schedule, open/close times, status, response threshold, same-campus setting, and target category (or all categories). |
+| `cycle_survey_snapshots` | Survey title and description captured when a cycle is created. |
+| `cycle_survey_questions` | Ordered question and section-title snapshot for a cycle. Evaluator forms, scoring, and result views use this fixed set even after the survey is edited. |
 | `cycle_targets` | Join table selecting targets for cycles. Its composite primary key prevents duplicate assignments. |
-| `eligibility_rules` | Allow/deny rules by evaluator central status, target central status, and same-campus status. |
+| `eligibility_rules` | Retained cycle rule configuration; rules do not filter which targets an evaluator may submit to. |
 
 ### Participation, answers, and results
 

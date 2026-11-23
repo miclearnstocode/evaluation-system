@@ -6,8 +6,8 @@ from backend.eligibility import _registration_policy_allows
 
 class RegistrationProfileTests(unittest.TestCase):
     def test_evaluator_cannot_evaluate_a_target_they_are_assigned_to(self):
-        user = {"id": 8}
-        target = {"id": 14}
+        user = {"id": 8, "position_role": "teaching_faculty"}
+        target = {"target_id": 14}
         with patch(
             "backend.eligibility.fetch_one",
             return_value={"id": 5},
@@ -18,7 +18,34 @@ class RegistrationProfileTests(unittest.TestCase):
 
     def test_evaluator_can_evaluate_unassigned_target(self):
         with patch("backend.eligibility.fetch_one", return_value=None):
-            self.assertTrue(_registration_policy_allows(None, {"id": 8}, {"id": 14}))
+            self.assertTrue(
+                _registration_policy_allows(
+                    None,
+                    {"id": 8, "position_role": "teaching_faculty"},
+                    {"id": 14},
+                )
+            )
+
+    def test_non_teaching_staff_can_evaluate_their_assigned_office(self):
+        with patch("backend.eligibility.fetch_one") as fetch:
+            self.assertTrue(
+                _registration_policy_allows(
+                    None,
+                    {"id": 8, "position_role": "non_teaching_staff"},
+                    {"id": 14},
+                )
+            )
+            fetch.assert_not_called()
+
+    def test_teaching_faculty_can_evaluate_unassigned_target(self):
+        with patch("backend.eligibility.fetch_one", return_value=None):
+            self.assertTrue(
+                _registration_policy_allows(
+                    None,
+                    {"id": 8, "position_role": "teaching_faculty"},
+                    {"target_id": 14},
+                )
+            )
 
     def test_missing_user_or_target_id_does_not_query_assignment_table(self):
         with patch("backend.eligibility.fetch_one") as fetch:

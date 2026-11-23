@@ -1,3 +1,4 @@
+import bcrypt
 from flask import Blueprint
 
 if __package__ and "." in __package__:
@@ -24,63 +25,18 @@ SERVICE_YEARS = [
 SERVICE_YEAR_CODES = {item["value"] for item in SERVICE_YEARS}
 
 OFFICE_SOURCES = [
-    ("campus_administrator", "campus_administrators", True),
-    ("satellite_college_director", "satellite_college_directors", True),
-    ("director", "directors", False),
-    ("rde_director", "rde_directors", False),
-    ("rde_center_director", "rde_center_directors", False),
+    ("campus_administrator", "campus_administrators", True, "campus_administrator_id"),
+    ("satellite_college_director", "satellite_college_directors", True, "satellite_college_director_id"),
+    ("director", "directors", False, "director_id"),
+    ("rde_director", "rde_directors", False, "rde_director_id"),
+    ("rde_center_director", "rde_center_directors", False, "rde_center_director_id"),
 ]
 
-# Central offices a student leader may belong to (matched on code)
-STUDENT_CENTRAL_OFFICE_CODES = {
-    "STUDENT_AFFAIRS",
-    "DISASTER_RISK",
-    "CLIMATE_CHANGE",
-    "NSTP",
-    "SPORTS",
-    "CULTURAL",
-}
 
-# Faculty may select every campus-scoped office plus every central office
-# EXCEPT the Bids and Awards Committee (BAC).
-FACULTY_EXCLUDED_CENTRAL_CODES = {"BAC"}
-
-# Campus administrators / satellite directors may select only the BAC.
-CAMPUS_ADMIN_ALLOWED_CODES = {"BAC"}
-
-CAMPUS_SCOPED_TYPES = {"campus_administrator", "satellite_college_director"}
-
-
-def _memberships_for_role(memberships, position_role):
-    """Filter the full membership list down to what the given role may select."""
-    if not position_role:
-        return []
-
-    if position_role == "teaching_faculty":
-        return [
-            m for m in memberships
-            if m["target_type"] in CAMPUS_SCOPED_TYPES
-            or m["unit_code"] not in FACULTY_EXCLUDED_CENTRAL_CODES
-        ]
-
-    if position_role == "student_leader":
-        return [
-            m for m in memberships
-            if m["target_type"] in CAMPUS_SCOPED_TYPES
-            or m["unit_code"] in STUDENT_CENTRAL_OFFICE_CODES
-        ]
-
-    if position_role == "campus_administrator_satellite_director":
-        return [
-            m for m in memberships
-            if m["unit_code"] in CAMPUS_ADMIN_ALLOWED_CODES
-        ]
-
-    if position_role == "director":
-        return list(memberships)
-
-    # non_teaching_staff and anything else: full list
-    return list(memberships)
+def _password_matches(password_hash: str, password: str) -> bool:
+    if password_hash.startswith(("$2a$", "$2b$", "$2y$")):
+        return bcrypt.checkpw(password.encode("utf-8"), password_hash.encode("ascii"))
+    return check_password_hash(password_hash, password)
 
 
 @bp.post("/api/auth/login")
@@ -102,13 +58,13 @@ def login():
         not user
         or not user["active"]
         or not user["password_hash"]
-        or not check_password_hash(user["password_hash"], password)
+        or not _password_matches(user["password_hash"], password)
     ):
         raise ApiError("Invalid email or password.", 401)
     session.clear()
     session["user_id"] = user["id"]
     session.permanent = True
-    return jsonify(role="admin" if user["role"] == "super_admin" else "evaluator")
+    return jsonify(role=user["role"])
 
 
 @bp.get("/api/auth/me")
@@ -118,7 +74,7 @@ def me():
     return jsonify(
         id=user["id"],
         email=user["email"],
-        role="admin" if user["role"] == "super_admin" else "evaluator",
+        role=user["role"],
     )
 
 
@@ -130,8 +86,6 @@ def logout():
 
 @bp.get("/api/auth/registration-options")
 def registration_options():
-    position_role = request.args.get("position_role")
-
     with connection() as conn:
         cursor = conn.cursor(dictionary=True)
         locations = fetch_all(
@@ -143,7 +97,7 @@ def registration_options():
         units = []
         head_offices = []
 
-        for target_type, table, has_campus in OFFICE_SOURCES:
+        for target_type, table, has_campus, _ in OFFICE_SOURCES:
             category = "campus_office" if has_campus else "central_admin"
             if has_campus:
                 rows = fetch_all(
@@ -190,7 +144,6 @@ def registration_options():
         locations=locations,
         service_years=SERVICE_YEARS,
         memberships=memberships,
-        role_memberships=_memberships_for_role(memberships, position_role),
         units=units,
         head_offices=head_offices,
         supervisors=[],
@@ -230,14 +183,11 @@ def register():
         raise ApiError("Select valid years of service.")
     if (
         not isinstance(office_unit_codes, list)
-        or len(office_unit_codes) > 3
         or any(not isinstance(code, str) for code in office_unit_codes)
     ):
-        raise ApiError("Select no more than three valid Offices/Units.")
+        raise ApiError("Office/Unit selections must be a list of office codes.")
     if len(set(office_unit_codes)) != len(office_unit_codes):
         raise ApiError("An Office/Unit cannot be selected more than once.")
-    if position_role == "non_teaching_staff" and not office_unit_codes:
-        raise ApiError("Select at least one Office/Unit.")
     if not isinstance(location_code, str):
         raise ApiError("Select a valid campus or office location.")
 
@@ -254,28 +204,46 @@ def register():
             if not campus:
                 raise ApiError("Select a valid campus or office location.")
 
-            valid_codes = set()
+            offices_by_code = {}
             if office_unit_codes:
                 placeholders = ", ".join(["%s"] * len(office_unit_codes))
-                for target_type, table, has_campus in OFFICE_SOURCES:
-                    if has_campus:
-                        rows = fetch_all(
-                            cursor,
-                            f"SELECT code FROM `{table}` WHERE code IN ({placeholders}) "
-                            "AND campus_id IN (SELECT id FROM campuses WHERE active = 1)",
-                            tuple(office_unit_codes),
-                        )
-                    else:
-                        rows = fetch_all(
-                            cursor,
-                            f"SELECT code FROM `{table}` WHERE code IN ({placeholders})",
-                            tuple(office_unit_codes),
-                        )
-                    valid_codes.update(row["code"] for row in rows)
+                for target_type, table, has_campus, reference_column in OFFICE_SOURCES:
+                    campus_join = (
+                        "JOIN campuses c ON c.id = office.campus_id AND c.active = 1 "
+                        if has_campus
+                        else ""
+                    )
+                    campus_columns = (
+                        "office.campus_id, c.is_central AS campus_is_central, "
+                        if has_campus
+                        else "NULL AS campus_id, NULL AS campus_is_central, "
+                    )
+                    rows = fetch_all(
+                        cursor,
+                        f"SELECT office.id AS source_id, office.code, {campus_columns}"
+                        f"t.id AS target_id, t.active AS target_active "
+                        f"FROM `{table}` office {campus_join}"
+                        f"LEFT JOIN targets t ON t.{reference_column} = office.id "
+                        "AND t.target_type = %s "
+                        f"WHERE office.code IN ({placeholders})",
+                        (target_type, *office_unit_codes),
+                    )
+                    for row in rows:
+                        office = {
+                            **row,
+                            "target_type": target_type,
+                            "reference_column": reference_column,
+                        }
+                        offices_by_code.setdefault(row["code"], []).append(office)
 
-            missing = set(office_unit_codes) - valid_codes
-            if missing:
+            if any(len(offices_by_code.get(code, [])) != 1 for code in office_unit_codes):
                 raise ApiError("One of the selected Offices/Units is unavailable.", 409)
+            if any(
+                offices_by_code[code][0]["target_id"] is not None
+                and not offices_by_code[code][0]["target_active"]
+                for code in office_unit_codes
+            ):
+                raise ApiError("One of the selected Offices/Units is inactive.", 409)
 
             cursor.execute(
                 "INSERT INTO users "
@@ -294,11 +262,58 @@ def register():
                 ),
             )
             user_id = cursor.lastrowid
+            target_ids_by_code = {}
+            for code in office_unit_codes:
+                office = offices_by_code[code][0]
+                target_id = office["target_id"]
+                if target_id is None:
+                    target_type = office["target_type"]
+                    reference_column = office["reference_column"]
+                    is_central = (
+                        bool(office["campus_is_central"])
+                        if office["campus_id"] is not None
+                        else target_type == "director"
+                    )
+                    try:
+                        cursor.execute(
+                            f"INSERT INTO targets "
+                            f"(target_type, {reference_column}, campus_id, is_central) "
+                            "VALUES (%s, %s, %s, %s)",
+                            (
+                                target_type,
+                                office["source_id"],
+                                office["campus_id"],
+                                is_central,
+                            ),
+                        )
+                        target_id = cursor.lastrowid
+                    except mysql.connector.IntegrityError as error:
+                        if error.errno != 1062:
+                            raise
+                        target = fetch_one(
+                            cursor,
+                            f"SELECT id, active FROM targets "
+                            f"WHERE target_type = %s AND {reference_column} = %s",
+                            (target_type, office["source_id"]),
+                        )
+                        if not target or not target["active"]:
+                            raise
+                        target_id = target["id"]
+                now = _utcnow_naive()
+                cursor.execute(
+                    "INSERT IGNORE INTO cycle_targets (cycle_id, target_id) "
+                    "SELECT c.id, %s FROM eval_cycles c "
+                    "WHERE c.status = 'open' AND c.opens_at <= %s AND c.closes_at > %s "
+                    "AND (c.target_type = 'all' OR c.target_type = %s)",
+                    (target_id, now, now, office["target_type"]),
+                )
+                target_ids_by_code[code] = target_id
+
             if office_unit_codes:
                 cursor.executemany(
-                    "INSERT INTO user_office_assignments (user_id, office_code, assignment_role) "
+                    "INSERT INTO user_office_assignments (user_id, target_id, assignment_role) "
                     "VALUES (%s, %s, 'member')",
-                    [(user_id, code) for code in office_unit_codes],
+                    [(user_id, target_ids_by_code[code]) for code in office_unit_codes],
                 )
             conn.commit()
         except mysql.connector.IntegrityError as error:

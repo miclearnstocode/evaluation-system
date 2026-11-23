@@ -1,0 +1,6 @@
+import { ReactNode } from "react";
+import SuperAdminShell from "./super-admin-shell";
+
+export default function SuperAdminLayout({ children }: { children: ReactNode }) {
+  return <SuperAdminShell>{children}</SuperAdminShell>;
+}

@@ -12,11 +12,12 @@ type RegistrationOptions = {
   locations: { code: string; name: string }[];
   service_years: SelectOption[];
   memberships: MembershipOption[];
-  role_memberships: MembershipOption[];
 };
 
 const fieldClassName =
-  "mt-1.5 w-full rounded-lg border border-slate-300 bg-white px-3.5 py-2.5 text-sm text-slate-900 outline-none transition focus:border-teal-600 focus:ring-4 focus:ring-teal-600/10 disabled:bg-slate-100";
+  "mt-1.5 w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-teal-600 focus:ring-4 focus:ring-teal-600/10 disabled:bg-slate-100 disabled:text-slate-500";
+
+const labelClassName = "block text-sm font-semibold text-slate-700";
 
 function targetTypeLabel(targetType: string): string {
   return (TARGET_TYPE_LABELS as Record<string, string>)[targetType] ?? targetType;
@@ -24,32 +25,12 @@ function targetTypeLabel(targetType: string): string {
 
 function EyeIcon({ open }: { open: boolean }) {
   return open ? (
-    <svg
-      xmlns="http://www.w3.org/2000/svg"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      className="h-5 w-5"
-      aria-hidden="true"
-    >
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-5 w-5" aria-hidden="true">
       <path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z" />
       <circle cx="12" cy="12" r="3" />
     </svg>
   ) : (
-    <svg
-      xmlns="http://www.w3.org/2000/svg"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      className="h-5 w-5"
-      aria-hidden="true"
-    >
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-5 w-5" aria-hidden="true">
       <path d="M9.88 9.88a3 3 0 1 0 4.24 4.24" />
       <path d="M10.73 5.08A10.43 10.43 0 0 1 12 5c6.5 0 10 7 10 7a13.16 13.16 0 0 1-1.67 2.68" />
       <path d="M6.61 6.61A13.53 13.53 0 0 0 2 12s3.5 7 10 7a9.74 9.74 0 0 0 5.39-1.61" />
@@ -58,12 +39,47 @@ function EyeIcon({ open }: { open: boolean }) {
   );
 }
 
+function CheckIcon() {
+  return (
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="h-5 w-5" aria-hidden="true">
+      <polyline points="20 6 9 17 4 12" />
+    </svg>
+  );
+}
+
+function StepCard({
+  step,
+  title,
+  description,
+  children,
+}: {
+  step: number;
+  title: string;
+  description: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm transition hover:shadow-md sm:p-7">
+      <div className="mb-5 flex items-start gap-3">
+        <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-teal-50 text-sm font-bold text-teal-700 ring-1 ring-teal-600/20">
+          {step}
+        </span>
+        <div>
+          <h2 className="text-base font-semibold text-slate-900">{title}</h2>
+          <p className="mt-0.5 text-sm text-slate-500">{description}</p>
+        </div>
+      </div>
+      {children}
+    </section>
+  );
+}
+
 export default function RegisterPage() {
   const [options, setOptions] = useState<RegistrationOptions | null>(null);
   const [optionsError, setOptionsError] = useState("");
   const [loadingOptions, setLoadingOptions] = useState(true);
   const [positionRole, setPositionRole] = useState("");
-  const [selectedTargetIds, setSelectedTargetIds] = useState<string[]>([]);
+  const [selectedOfficeCodes, setSelectedOfficeCodes] = useState<string[]>([]);
   const [locationCode, setLocationCode] = useState("");
   const [yearsOfService, setYearsOfService] = useState("");
   const [firstName, setFirstName] = useState("");
@@ -80,11 +96,7 @@ export default function RegisterPage() {
 
   useEffect(() => {
     let active = true;
-    const url = positionRole
-      ? `/api/auth/registration-options?position_role=${encodeURIComponent(positionRole)}`
-      : "/api/auth/registration-options";
-    setLoadingOptions(true);
-    apiFetch<RegistrationOptions>(url)
+    apiFetch<RegistrationOptions>("/api/auth/registration-options")
       .then((data) => {
         if (active) {
           setOptions(data);
@@ -100,10 +112,11 @@ export default function RegisterPage() {
     return () => {
       active = false;
     };
-  }, [positionRole]);
+  }, []);
 
-  // The backend decides which offices/units are available per role.
-  const targetChoices = options?.role_memberships ?? [];
+  const officeChoices = options?.memberships ?? [];
+  const isStudentLeader = positionRole === "student_leader";
+  const passwordMismatch = confirmPassword.length > 0 && password !== confirmPassword;
 
   async function handleRegister(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -114,26 +127,13 @@ export default function RegisterPage() {
       return;
     }
 
-    const rolesRequiringTarget = [
-      "non_teaching_staff",
-      "campus_administrator_satellite_director",
-      "director",
-      "student_leader",
-      "teaching_faculty",
-    ];
-
-    if (rolesRequiringTarget.includes(positionRole) && selectedTargetIds.length === 0) {
-      setError("Select at least one office/unit you belong to.");
-      return;
-    }
-
     if (
-      selectedTargetIds.some(
-        (targetId) => !targetChoices.some((target) => target.unit_code === targetId),
+      selectedOfficeCodes.some(
+        (officeCode) => !officeChoices.some((office) => office.unit_code === officeCode),
       )
     ) {
       setError(
-        "One of the selected targets is no longer available for your role. Reload the page and try again.",
+        "One of the selected offices/units is no longer available. Reload the page and try again.",
       );
       return;
     }
@@ -149,9 +149,9 @@ export default function RegisterPage() {
           first_name: firstName.trim(),
           last_name: lastName.trim(),
           position_role: positionRole,
-          office_unit_codes: selectedTargetIds,
+          office_unit_codes: selectedOfficeCodes,
           location_code: locationCode,
-          years_of_service: positionRole === "student_leader" ? null : yearsOfService,
+          years_of_service: isStudentLeader ? null : yearsOfService,
         }),
       });
       setRegistered(true);
@@ -168,310 +168,447 @@ export default function RegisterPage() {
   }
 
   return (
-    <main className="min-h-screen bg-slate-50 text-slate-900">
-      <header className="border-b border-slate-200 bg-white">
+    <main className="min-h-screen bg-gradient-to-br from-slate-50 via-white to-teal-50/40 text-slate-900">
+      {/* Header */}
+      <header className="sticky top-0 z-20 border-b border-slate-200/70 bg-white/80 backdrop-blur-md">
         <div className="mx-auto flex max-w-6xl items-center justify-between px-5 py-4">
           <Link href="/" className="flex items-center gap-3">
-            <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-[#1F3A5F] text-sm font-bold text-white">
+            <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-[#1F3A5F] to-[#0F9D8A] text-sm font-bold text-white shadow-md shadow-teal-900/20">
               AES
             </span>
-            <span className="font-semibold tracking-tight text-[#1F3A5F]">
+            <span className="hidden font-semibold tracking-tight text-[#1F3A5F] sm:block">
               Anonymous Evaluation System
             </span>
           </Link>
-          <Link href="/" className="text-sm font-semibold text-slate-600 hover:text-[#1F3A5F]">
-            Back to sign in
+          <Link
+            href="/"
+            className="inline-flex items-center gap-1.5 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-600 transition hover:border-slate-300 hover:text-[#1F3A5F]"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4" aria-hidden="true">
+              <line x1="19" y1="12" x2="5" y2="12" />
+              <polyline points="12 19 5 12 12 5" />
+            </svg>
+            Sign in
           </Link>
         </div>
       </header>
 
-      <section className="mx-auto max-w-3xl px-5 py-10 sm:py-14">
-        <div className="mb-8">
-          <p className="text-xs font-semibold uppercase tracking-[0.16em] text-teal-800">
-            Evaluator registration
-          </p>
-          <h1 className="mt-2 text-3xl font-bold tracking-tight text-[#1F3A5F]">
-            Create your account
-          </h1>
-          <p className="mt-3 max-w-2xl text-sm leading-6 text-slate-600">
-            Your role, target assignments, and campus determine which evaluations are available to you.
-            Create an account and sign in immediately. Email verification and administrator approval are not required.
-          </p>
-        </div>
-
-        <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-lg shadow-slate-200/50 sm:p-8">
-          {registered ? (
-            <div className="rounded-xl border border-teal-200 bg-teal-50 p-5">
-              <h2 className="font-semibold text-teal-950">Account created</h2>
-              <p className="mt-2 text-sm leading-6 text-teal-900">
-                {notice}
+      <div className="mx-auto max-w-6xl px-5 py-8 sm:py-12">
+        <div className="grid gap-8 lg:grid-cols-[1fr_1.6fr] lg:items-start">
+          {/* Left: Intro panel */}
+          <aside className="lg:sticky lg:top-24">
+            <div className="overflow-hidden rounded-3xl bg-gradient-to-br from-[#1F3A5F] via-[#1a4a5f] to-[#0F9D8A] p-7 text-white shadow-xl shadow-teal-900/20 sm:p-8">
+              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-teal-200">
+                Evaluator registration
               </p>
-              <Link
-                href="/"
-                className="mt-5 inline-flex rounded-lg bg-[#0F9D8A] px-4 py-2.5 text-sm font-semibold text-white hover:bg-[#0C8575]"
-              >
-                Return to sign in
-              </Link>
+              <h1 className="mt-3 text-3xl font-bold tracking-tight sm:text-4xl">
+                Join the evaluation system
+              </h1>
+              <p className="mt-3 text-sm leading-6 text-teal-50/90">
+                Your role, target assignments, and campus determine which evaluations are available
+                to you. Create an account and start evaluating right away.
+              </p>
+
+              <div className="mt-8 space-y-4">
+                {[
+                  {
+                    icon: (
+                      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-5 w-5" aria-hidden="true">
+                        <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+                      </svg>
+                    ),
+                    title: "Anonymous by design",
+                    text: "Your identity stays private on every evaluation you submit.",
+                  },
+                  {
+                    icon: (
+                      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-5 w-5" aria-hidden="true">
+                        <polyline points="20 6 9 17 4 12" />
+                      </svg>
+                    ),
+                    title: "Instant activation",
+                    text: "No email verification or admin approval required.",
+                  },
+                  {
+                    icon: (
+                      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-5 w-5" aria-hidden="true">
+                        <circle cx="12" cy="12" r="10" />
+                        <polyline points="12 6 12 12 16 14" />
+                      </svg>
+                    ),
+                    title: "Quick setup",
+                    text: "Takes only a couple of minutes to complete.",
+                  },
+                ].map((item) => (
+                  <div key={item.title} className="flex items-start gap-3">
+                    <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-white/10 text-teal-100 ring-1 ring-white/20">
+                      {item.icon}
+                    </span>
+                    <div>
+                      <p className="text-sm font-semibold text-white">{item.title}</p>
+                      <p className="mt-0.5 text-xs leading-5 text-teal-100/80">{item.text}</p>
+                    </div>
+                  </div>
+                ))}
+              </div>
             </div>
-          ) : (
-            <form onSubmit={handleRegister} className="space-y-5">
-              {loadingOptions && <p role="status" className="text-sm text-slate-500">Loading registration choices…</p>}
-              {optionsError && (
-                <div role="alert" className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-                  <p>{optionsError}</p>
-                  <button
-                    type="button"
-                    onClick={() => window.location.reload()}
-                    className="mt-2 font-semibold underline"
-                  >
-                    Try again
-                  </button>
+          </aside>
+
+          {/* Right: Form */}
+          <div className="min-w-0">
+            {registered ? (
+              <div className="rounded-3xl border border-teal-200 bg-white p-8 text-center shadow-lg shadow-teal-900/5 sm:p-10">
+                <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-teal-50 text-teal-600 ring-8 ring-teal-50">
+                  <CheckIcon />
                 </div>
-              )}
-              {options && (
-                <>
-                  <div className="grid gap-5 sm:grid-cols-2">
+                <h2 className="mt-5 text-2xl font-bold tracking-tight text-slate-900">
+                  You&apos;re all set!
+                </h2>
+                <p className="mx-auto mt-2 max-w-sm text-sm leading-6 text-slate-600">{notice}</p>
+                <Link
+                  href="/"
+                  className="mt-7 inline-flex items-center justify-center gap-2 rounded-xl bg-[#0F9D8A] px-6 py-3 text-sm font-semibold text-white shadow-lg shadow-teal-600/20 transition hover:bg-[#0C8575] hover:shadow-teal-600/30"
+                >
+                  Go to sign in
+                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4" aria-hidden="true">
+                    <line x1="5" y1="12" x2="19" y2="12" />
+                    <polyline points="12 5 19 12 12 19" />
+                  </svg>
+                </Link>
+              </div>
+            ) : (
+              <form onSubmit={handleRegister} className="space-y-5">
+                {/* Status / errors */}
+                {optionsError && (
+                  <div role="alert" className="flex items-start gap-3 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="mt-0.5 h-5 w-5 shrink-0" aria-hidden="true">
+                      <circle cx="12" cy="12" r="10" />
+                      <line x1="12" y1="8" x2="12" y2="12" />
+                      <line x1="12" y1="16" x2="12.01" y2="16" />
+                    </svg>
                     <div>
-                      <label htmlFor="first-name" className="block text-sm font-medium text-slate-700">
-                        First name <span className="text-red-500">*</span>
-                      </label>
-                      <input
-                        id="first-name"
-                        type="text"
-                        autoComplete="given-name"
-                        maxLength={100}
-                        value={firstName}
-                        onChange={(event) => setFirstName(event.target.value)}
-                        required
-                        className={fieldClassName}
-                      />
-                    </div>
-                    <div>
-                      <label htmlFor="last-name" className="block text-sm font-medium text-slate-700">
-                        Last name <span className="text-red-500">*</span>
-                      </label>
-                      <input
-                        id="last-name"
-                        type="text"
-                        autoComplete="family-name"
-                        maxLength={100}
-                        value={lastName}
-                        onChange={(event) => setLastName(event.target.value)}
-                        required
-                        className={fieldClassName}
-                      />
+                      <p>{optionsError}</p>
+                      <button type="button" onClick={() => window.location.reload()} className="mt-1 font-semibold underline">
+                        Try again
+                      </button>
                     </div>
                   </div>
+                )}
 
-                  <div className="grid gap-5 sm:grid-cols-2">
-                    <div>
-                      <label htmlFor="position-role" className="block text-sm font-medium text-slate-700">
-                        Your Position/Role <span className="text-red-500">*</span>
-                      </label>
-                      <select
-                        id="position-role"
-                        value={positionRole}
-                        onChange={(event) => {
-                          setPositionRole(event.target.value);
-                          setSelectedTargetIds([]); // Reset selections when role changes
-                          if (event.target.value === "student_leader") {
-                            setYearsOfService("");
-                          }
-                        }}
-                        required
-                        className={fieldClassName}
-                      >
-                        <option value="">Choose your role</option>
-                        {options.position_roles.map((option) => (
-                          <option key={option.value} value={option.value}>{option.label}</option>
-                        ))}
-                      </select>
-                    </div>
+                {loadingOptions && (
+                  <div role="status" className="flex items-center gap-3 rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-500">
+                    <svg className="h-4 w-4 animate-spin text-teal-600" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                    </svg>
+                    Loading registration choices…
                   </div>
+                )}
 
-                  <fieldset aria-describedby="target-assignment-help" className="rounded-xl border border-slate-200 p-4">
-                    <legend className="px-1 text-sm font-medium text-slate-700">
-                      Which Office/Unit do you belong? <span className="text-red-500">* Check all that apply.</span>
-                    </legend>
-                    <p id="target-assignment-help" className="mb-3 text-xs leading-5 text-slate-500">
-                      {positionRole === "non_teaching_staff" ||
-                      positionRole === "campus_administrator_satellite_director" ||
-                      positionRole === "director" ||
-                      positionRole === "student_leader" ||
-                      positionRole === "teaching_faculty"
-                        ? "At least one office/unit is required for your role. "
-                        : ""}
-                      {` ${selectedTargetIds.length} selected.`}
-                    </p>
-                    {!positionRole ? (
-                      <p className="text-sm text-slate-500">Choose your position/role first.</p>
-                    ) : loadingOptions ? (
-                      <p className="text-sm text-slate-500">Loading available offices/units…</p>
-                    ) : targetChoices.length === 0 ? (
-                      <p className="text-sm text-slate-500">No active evaluation targets are available for your role.</p>
-                    ) : (
-                      <div className="grid max-h-72 gap-1 overflow-y-auto sm:grid-cols-2">
-                        {targetChoices.map((target) => {
-                          const checked = selectedTargetIds.includes(target.unit_code);
-                          return (
-                            <label
-                              key={target.id}
-                              className="flex cursor-pointer items-start gap-2 rounded-lg px-2.5 py-2 text-sm text-slate-700 hover:bg-slate-50"
-                            >
-                              <input
-                                type="checkbox"
-                                checked={checked}
-                                onChange={(event) => {
-                                  setSelectedTargetIds((current) =>
-                                    event.target.checked
-                                      ? [...current, target.unit_code]
-                                      : current.filter((id) => id !== target.unit_code),
-                                  );
-                                }}
-                                className="mt-0.5 h-4 w-4 shrink-0 accent-[#0F9D8A]"
-                              />
-                              <span className="flex-1">
-                                {target.name}
-                                <span className="mt-0.5 block text-xs text-slate-500">
-                                  {targetTypeLabel(target.target_type)}
-                                </span>
-                              </span>
+                {options && (
+                  <>
+                    {/* Step 1: Personal info */}
+                    <StepCard step={1} title="Personal information" description="Tell us who you are.">
+                      <div className="grid gap-5 sm:grid-cols-2">
+                        <div>
+                          <label htmlFor="first-name" className={labelClassName}>
+                            First name <span className="text-red-500">*</span>
+                          </label>
+                          <input
+                            id="first-name"
+                            type="text"
+                            autoComplete="given-name"
+                            maxLength={100}
+                            value={firstName}
+                            onChange={(event) => setFirstName(event.target.value)}
+                            required
+                            placeholder="Juan"
+                            className={fieldClassName}
+                          />
+                        </div>
+                        <div>
+                          <label htmlFor="last-name" className={labelClassName}>
+                            Last name <span className="text-red-500">*</span>
+                          </label>
+                          <input
+                            id="last-name"
+                            type="text"
+                            autoComplete="family-name"
+                            maxLength={100}
+                            value={lastName}
+                            onChange={(event) => setLastName(event.target.value)}
+                            required
+                            placeholder="Dela Cruz"
+                            className={fieldClassName}
+                          />
+                        </div>
+                      </div>
+                    </StepCard>
+
+                    {/* Step 2: Role & assignment */}
+                    <StepCard step={2} title="Role & assignment" description="This helps us match you with the right evaluations.">
+                      <div className="space-y-5">
+                        <div>
+                          <label htmlFor="position-role" className={labelClassName}>
+                            Your Position/Role <span className="text-red-500">*</span>
+                          </label>
+                          <select
+                            id="position-role"
+                            value={positionRole}
+                            onChange={(event) => {
+                              setPositionRole(event.target.value);
+                              if (event.target.value === "student_leader") {
+                                setYearsOfService("");
+                              }
+                            }}
+                            required
+                            className={fieldClassName}
+                          >
+                            <option value="">Choose your role</option>
+                            {options.position_roles.map((option) => (
+                              <option key={option.value} value={option.value}>{option.label}</option>
+                            ))}
+                          </select>
+                        </div>
+
+                        <div>
+                          <label htmlFor="campus-location" className={labelClassName}>
+                            Your campus or office location <span className="text-red-500">*</span>
+                          </label>
+                          <select
+                            id="campus-location"
+                            value={locationCode}
+                            onChange={(event) => setLocationCode(event.target.value)}
+                            required
+                            className={fieldClassName}
+                          >
+                            <option value="">Choose your campus/location</option>
+                            {options.locations.map((location) => (
+                              <option key={location.code} value={location.code}>{location.name}</option>
+                            ))}
+                          </select>
+                        </div>
+
+                        {!isStudentLeader && (
+                          <div className="animate-in fade-in slide-in-from-top-1 duration-200">
+                            <label htmlFor="years-of-service" className={labelClassName}>
+                              Years of Service / Stay in CAPSU <span className="text-red-500">*</span>
                             </label>
-                          );
-                        })}
+                            <select
+                              id="years-of-service"
+                              value={yearsOfService}
+                              onChange={(event) => setYearsOfService(event.target.value)}
+                              required
+                              className={fieldClassName}
+                            >
+                              <option value="">Choose a range</option>
+                              {options.service_years.map((option) => (
+                                <option key={option.value} value={option.value}>{option.label}</option>
+                              ))}
+                            </select>
+                          </div>
+                        )}
+                      </div>
+                    </StepCard>
+
+                    {/* Step 3: Office membership */}
+                    <StepCard step={3} title="Office/Unit membership" description="Optional — select all that apply.">
+                      <fieldset aria-describedby="office-membership-help">
+                        <div className="mb-3 flex items-center justify-between">
+                          <p id="office-membership-help" className="text-xs leading-5 text-slate-500">
+                            Select all offices/units that apply, if any.
+                          </p>
+                          <span className="rounded-full bg-teal-50 px-2.5 py-0.5 text-xs font-semibold text-teal-700 ring-1 ring-teal-600/20">
+                            {selectedOfficeCodes.length} selected
+                          </span>
+                        </div>
+                        {officeChoices.length === 0 ? (
+                          <p className="rounded-lg border border-dashed border-slate-300 bg-slate-50 px-4 py-6 text-center text-sm text-slate-500">
+                            No offices/units are available right now.
+                          </p>
+                        ) : (
+                          <div className="grid max-h-72 gap-2 overflow-y-auto pr-1 sm:grid-cols-2">
+                            {officeChoices.map((office) => {
+                              const checked = selectedOfficeCodes.includes(office.unit_code);
+                              return (
+                                <label
+                                  key={office.id}
+                                  className={`flex cursor-pointer items-start gap-3 rounded-xl border px-3.5 py-3 text-sm transition ${
+                                    checked
+                                      ? "border-teal-500 bg-teal-50/70 ring-1 ring-teal-500/20"
+                                      : "border-slate-200 bg-white hover:border-slate-300 hover:bg-slate-50"
+                                  }`}
+                                >
+                                  <input
+                                    type="checkbox"
+                                    checked={checked}
+                                    onChange={(event) => {
+                                      setSelectedOfficeCodes((current) =>
+                                        event.target.checked
+                                          ? [...current, office.unit_code]
+                                          : current.filter((code) => code !== office.unit_code),
+                                      );
+                                    }}
+                                    className="mt-0.5 h-4 w-4 shrink-0 rounded accent-[#0F9D8A]"
+                                  />
+                                  <span className="flex-1">
+                                    <span className="block font-medium text-slate-800">{office.name}</span>
+                                    <span className="mt-0.5 inline-block rounded bg-slate-100 px-1.5 py-0.5 text-[11px] font-medium text-slate-500">
+                                      {targetTypeLabel(office.target_type)}
+                                    </span>
+                                  </span>
+                                </label>
+                              );
+                            })}
+                          </div>
+                        )}
+                      </fieldset>
+                    </StepCard>
+
+                    {/* Step 4: Account credentials */}
+                    <StepCard step={4} title="Account credentials" description="Use your CAPSU email and a strong password.">
+                      <div className="space-y-5">
+                        <div>
+                          <label htmlFor="register-email" className={labelClassName}>
+                            CAPSU email address <span className="text-red-500">*</span>
+                          </label>
+                          <input
+                            id="register-email"
+                            type="email"
+                            autoComplete="email"
+                            placeholder="you@capsu.edu.ph"
+                            value={email}
+                            onChange={(event) => setEmail(event.target.value)}
+                            required
+                            className={fieldClassName}
+                          />
+                        </div>
+
+                        <div className="grid gap-5 sm:grid-cols-2">
+                          <div>
+                            <label htmlFor="register-password" className={labelClassName}>
+                              Password <span className="text-red-500">*</span>
+                            </label>
+                            <div className="relative mt-1.5">
+                              <input
+                                id="register-password"
+                                type={showPassword ? "text" : "password"}
+                                autoComplete="new-password"
+                                minLength={12}
+                                value={password}
+                                onChange={(event) => setPassword(event.target.value)}
+                                required
+                                className={`${fieldClassName} mt-0 pr-11`}
+                              />
+                              <button
+                                type="button"
+                                onClick={() => setShowPassword((v) => !v)}
+                                aria-label={showPassword ? "Hide password" : "Show password"}
+                                aria-pressed={showPassword}
+                                className="absolute inset-y-0 right-0 flex items-center pr-3 text-slate-400 transition hover:text-slate-600 focus:outline-none focus-visible:text-teal-700"
+                              >
+                                <EyeIcon open={showPassword} />
+                              </button>
+                            </div>
+                            <p className="mt-1.5 flex items-center gap-1 text-xs text-slate-500">
+                              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-3.5 w-3.5" aria-hidden="true">
+                                <circle cx="12" cy="12" r="10" />
+                                <line x1="12" y1="16" x2="12" y2="12" />
+                                <line x1="12" y1="8" x2="12.01" y2="8" />
+                              </svg>
+                              Use at least 12 characters.
+                            </p>
+                          </div>
+                          <div>
+                            <label htmlFor="confirm-password" className={labelClassName}>
+                              Confirm password <span className="text-red-500">*</span>
+                            </label>
+                            <div className="relative mt-1.5">
+                              <input
+                                id="confirm-password"
+                                type={showConfirmPassword ? "text" : "password"}
+                                autoComplete="new-password"
+                                minLength={12}
+                                value={confirmPassword}
+                                onChange={(event) => setConfirmPassword(event.target.value)}
+                                required
+                                className={`${fieldClassName} mt-0 pr-11 ${
+                                  passwordMismatch ? "border-red-400 focus:border-red-500 focus:ring-red-500/10" : ""
+                                }`}
+                              />
+                              <button
+                                type="button"
+                                onClick={() => setShowConfirmPassword((v) => !v)}
+                                aria-label={showConfirmPassword ? "Hide confirm password" : "Show confirm password"}
+                                aria-pressed={showConfirmPassword}
+                                className="absolute inset-y-0 right-0 flex items-center pr-3 text-slate-400 transition hover:text-slate-600 focus:outline-none focus-visible:text-teal-700"
+                              >
+                                <EyeIcon open={showConfirmPassword} />
+                              </button>
+                            </div>
+                            {passwordMismatch && (
+                              <p className="mt-1.5 text-xs font-medium text-red-600">
+                                Passwords do not match.
+                              </p>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    </StepCard>
+
+                    {/* Feedback */}
+                    {error && (
+                      <div role="alert" className="flex items-start gap-3 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="mt-0.5 h-5 w-5 shrink-0" aria-hidden="true">
+                          <circle cx="12" cy="12" r="10" />
+                          <line x1="12" y1="8" x2="12" y2="12" />
+                          <line x1="12" y1="16" x2="12.01" y2="16" />
+                        </svg>
+                        <p>{error}</p>
                       </div>
                     )}
-                  </fieldset>
+                    {notice && (
+                      <div role="status" className="rounded-xl border border-teal-200 bg-teal-50 px-4 py-3 text-sm text-teal-900">
+                        {notice}
+                      </div>
+                    )}
 
-                  <div className="grid gap-5 sm:grid-cols-2">
-                    <div className={positionRole === "student_leader" ? "sm:col-span-2" : ""}>
-                      <label htmlFor="campus-location" className="block text-sm font-medium text-slate-700">
-                        Your campus or office location <span className="text-red-500">*</span>
-                      </label>
-                      <select
-                        id="campus-location"
-                        value={locationCode}
-                        onChange={(event) => setLocationCode(event.target.value)}
-                        required
-                        className={fieldClassName}
+                    {/* Submit */}
+                    <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
+                      <button
+                        type="submit"
+                        disabled={loading || loadingOptions || !options.locations.length}
+                        className="group flex w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-[#0F9D8A] to-[#0C8575] px-5 py-3.5 text-sm font-semibold text-white shadow-lg shadow-teal-600/20 transition hover:shadow-teal-600/30 disabled:cursor-not-allowed disabled:opacity-60"
                       >
-                        <option value="">Choose your campus/location</option>
-                        {options.locations.map((location) => (
-                          <option key={location.code} value={location.code}>{location.name}</option>
-                        ))}
-                      </select>
+                        {loading ? (
+                          <>
+                            <svg className="h-4 w-4 animate-spin" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                            </svg>
+                            Creating account…
+                          </>
+                        ) : (
+                          <>
+                            Create evaluator account
+                            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4 transition group-hover:translate-x-0.5" aria-hidden="true">
+                              <line x1="5" y1="12" x2="19" y2="12" />
+                              <polyline points="12 5 19 12 12 19" />
+                            </svg>
+                          </>
+                        )}
+                      </button>
+                      <p className="mt-3 text-center text-xs leading-5 text-slate-500">
+                        By creating an account, you agree to keep evaluations anonymous and confidential.
+                      </p>
                     </div>
-                    {positionRole !== "student_leader" && (
-                      <div>
-                        <label htmlFor="years-of-service" className="block text-sm font-medium text-slate-700">
-                          Years of Service / Stay in CAPSU <span className="text-red-500">*</span>
-                        </label>
-                        <select
-                          id="years-of-service"
-                          value={yearsOfService}
-                          onChange={(event) => setYearsOfService(event.target.value)}
-                          required
-                          className={fieldClassName}
-                        >
-                          <option value="">Choose a range</option>
-                          {options.service_years.map((option) => (
-                            <option key={option.value} value={option.value}>{option.label}</option>
-                          ))}
-                        </select>
-                      </div>
-                    )}
-                  </div>
-
-                  <div>
-                    <label htmlFor="register-email" className="block text-sm font-medium text-slate-700">
-                      CAPSU email address <span className="text-red-500">*</span>
-                    </label>
-                    <input
-                      id="register-email"
-                      type="email"
-                      autoComplete="email"
-                      placeholder="you@capsu.edu.ph"
-                      value={email}
-                      onChange={(event) => setEmail(event.target.value)}
-                      required
-                      className={fieldClassName}
-                    />
-                  </div>
-
-                  <div className="grid gap-5 sm:grid-cols-2">
-                    <div>
-                      <label htmlFor="register-password" className="block text-sm font-medium text-slate-700">
-                        Password <span className="text-red-500">*</span>
-                      </label>
-                      <div className="relative mt-1.5">
-                        <input
-                          id="register-password"
-                          type={showPassword ? "text" : "password"}
-                          autoComplete="new-password"
-                          minLength={12}
-                          value={password}
-                          onChange={(event) => setPassword(event.target.value)}
-                          required
-                          className={`${fieldClassName} mt-0 pr-11`}
-                        />
-                        <button
-                          type="button"
-                          onClick={() => setShowPassword((v) => !v)}
-                          aria-label={showPassword ? "Hide password" : "Show password"}
-                          aria-pressed={showPassword}
-                          className="absolute inset-y-0 right-0 flex items-center pr-3 text-slate-400 transition hover:text-slate-600 focus:outline-none focus-visible:text-teal-700"
-                        >
-                          <EyeIcon open={showPassword} />
-                        </button>
-                      </div>
-                      <p className="mt-1.5 text-xs text-slate-500">Use at least 12 characters.</p>
-                    </div>
-                    <div>
-                      <label htmlFor="confirm-password" className="block text-sm font-medium text-slate-700">
-                        Confirm password <span className="text-red-500">*</span>
-                      </label>
-                      <div className="relative mt-1.5">
-                        <input
-                          id="confirm-password"
-                          type={showConfirmPassword ? "text" : "password"}
-                          autoComplete="new-password"
-                          minLength={12}
-                          value={confirmPassword}
-                          onChange={(event) => setConfirmPassword(event.target.value)}
-                          required
-                          className={`${fieldClassName} mt-0 pr-11`}
-                        />
-                        <button
-                          type="button"
-                          onClick={() => setShowConfirmPassword((v) => !v)}
-                          aria-label={showConfirmPassword ? "Hide confirm password" : "Show confirm password"}
-                          aria-pressed={showConfirmPassword}
-                          className="absolute inset-y-0 right-0 flex items-center pr-3 text-slate-400 transition hover:text-slate-600 focus:outline-none focus-visible:text-teal-700"
-                        >
-                          <EyeIcon open={showConfirmPassword} />
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-
-                  {error && <p role="alert" className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</p>}
-                  {notice && <p role="status" className="rounded-lg border border-teal-200 bg-teal-50 px-4 py-3 text-sm text-teal-900">{notice}</p>}
-                  <button
-                    type="submit"
-                    disabled={loading || loadingOptions || !options.locations.length}
-                    className="w-full rounded-lg bg-[#0F9D8A] px-5 py-3 text-sm font-semibold text-white transition hover:bg-[#0C8575] disabled:cursor-not-allowed disabled:opacity-60"
-                  >
-                    {loading ? "Creating account…" : "Create evaluator account"}
-                  </button>
-                  <p className="text-center text-xs leading-5 text-slate-500">
-                    Your account is active as soon as registration is complete.
-                  </p>
-                </>
-              )}
-            </form>
-          )}
+                  </>
+                )}
+              </form>
+            )}
+          </div>
         </div>
-      </section>
+      </div>
     </main>
   );
 }

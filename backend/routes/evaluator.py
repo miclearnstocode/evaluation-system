@@ -11,6 +11,21 @@ else:
 
 bp = Blueprint("evaluator_api", __name__)
 
+
+def _load_evaluator_target(cursor: Any, target_id: int) -> dict[str, Any] | None:
+    return fetch_one(
+        cursor,
+        "SELECT t.id, t.target_type, COALESCE(tc.campus_id, t.campus_id) AS campus_id, "
+        "t.is_central, COALESCE(tc.name, t.office_head_name, "
+        "CONCAT(REPLACE(t.target_type, '_', ' '), ' #', t.id)) AS target_name, "
+        "c.name AS campus_name FROM targets t "
+        "LEFT JOIN target_catalog tc ON tc.id = t.id "
+        "LEFT JOIN campuses c ON c.id = COALESCE(tc.campus_id, t.campus_id) "
+        "WHERE t.id = %s",
+        (target_id,),
+    )
+
+
 @bp.get("/api/evaluator/targets")
 @require_role("evaluator")
 def evaluator_targets():
@@ -22,25 +37,25 @@ def evaluator_targets():
             "SELECT c.id AS cycle_id, c.title AS cycle_name, c.opens_at, c.closes_at, c.survey_id "
             "FROM eval_cycles c WHERE c.status = 'open' ORDER BY c.closes_at",
         )
+        targets = fetch_all(
+            cursor,
+            "SELECT t.id AS target_id, t.target_type, "
+            "COALESCE(tc.campus_id, t.campus_id) AS campus_id, t.is_central, "
+            "COALESCE(tc.name, t.office_head_name, "
+            "CONCAT(REPLACE(t.target_type, '_', ' '), ' #', t.id)) AS target_name, "
+            "c.name AS campus_name FROM targets t "
+            "LEFT JOIN target_catalog tc ON tc.id = t.id "
+            "LEFT JOIN campuses c ON c.id = COALESCE(tc.campus_id, t.campus_id) "
+            "ORDER BY target_name",
+        )
+        open_cycles = [
+            cycle
+            for cycle in cycles
+            if _cycle_is_open({"status": "open", **cycle})
+        ]
         items = []
-        for cycle in cycles:
-            if not _cycle_is_open({"status": "open", **cycle}):
-                continue
-            rules = _load_rules(cursor, cycle["cycle_id"])
-            targets = fetch_all(
-                cursor,
-                "SELECT t.id AS target_id, t.target_type, tc.campus_id, t.is_central, "
-                "tc.name AS target_name, c.name AS campus_name "
-                "FROM cycle_targets ct JOIN targets t ON t.id = ct.target_id "
-                "JOIN target_catalog tc ON tc.id = t.id "
-                "LEFT JOIN campuses c ON c.id = tc.campus_id "
-                "WHERE ct.cycle_id = %s AND t.active = 1 "
-                "AND (tc.campus_id IS NULL OR c.active = 1)",
-                (cycle["cycle_id"],),
-            )
+        for cycle in open_cycles:
             for target in targets:
-                if not _cycle_user_eligible(cursor, cycle["cycle_id"], user, target, rules):
-                    continue
                 previous = fetch_one(
                     cursor,
                     "SELECT id FROM participation WHERE user_id = %s AND cycle_id = %s AND target_id = %s",
@@ -54,9 +69,24 @@ def evaluator_targets():
                         "target_type": target["target_type"],
                         "target_name": target["target_name"],
                         "campus_name": target["campus_name"],
+                        "is_central": target["is_central"],
                         "submitted": previous is not None,
                     }
                 )
+        if not open_cycles:
+            items = [
+                {
+                    "cycle_id": None,
+                    "cycle_name": None,
+                    "target_id": target["target_id"],
+                    "target_type": target["target_type"],
+                    "target_name": target["target_name"],
+                    "campus_name": target["campus_name"],
+                    "is_central": target["is_central"],
+                    "submitted": False,
+                }
+                for target in targets
+            ]
         cursor.close()
     return jsonify(items=items)
 
@@ -76,9 +106,9 @@ def evaluator_form(target_id: int):
         )
         if not cycle or not _cycle_is_open(cycle):
             raise ApiError("This evaluation cycle is not open.", 409)
-        target = _load_cycle_target(cursor, cycle_id, target_id)
-        if not target or not _cycle_user_eligible(cursor, cycle_id, user, target):
-            raise ApiError("You are not eligible to evaluate this target.", 403)
+        target = _load_evaluator_target(cursor, target_id)
+        if not target:
+            raise ApiError("Target not found.", 404)
         previous = fetch_one(
             cursor,
             "SELECT id FROM participation WHERE user_id = %s AND cycle_id = %s AND target_id = %s",
@@ -86,7 +116,7 @@ def evaluator_form(target_id: int):
         )
         if previous:
             raise ApiError("You have already submitted this evaluation.", 409)
-        survey = _load_survey(cursor, cycle["survey_id"])
+        survey = _load_survey(cursor, cycle["survey_id"], cycle_id=cycle_id)
         if survey["status"] != "published":
             raise ApiError("This survey is not available.", 409)
         cursor.close()
@@ -121,9 +151,9 @@ def submit_evaluation():
             )
             if not cycle or not _cycle_is_open(cycle):
                 raise ApiError("This evaluation cycle is not open.", 409)
-            target = _load_cycle_target(cursor, cycle_id, target_id)
-            if not target or not _cycle_user_eligible(cursor, cycle_id, user, target):
-                raise ApiError("You are not eligible to evaluate this target.", 403)
+            target = _load_evaluator_target(cursor, target_id)
+            if not target:
+                raise ApiError("Target not found.", 404)
             existing = fetch_one(
                 cursor,
                 "SELECT id FROM participation WHERE user_id = %s AND cycle_id = %s AND target_id = %s",
@@ -131,9 +161,18 @@ def submit_evaluation():
             )
             if existing:
                 raise ApiError("You have already submitted this evaluation.", 409)
-            survey = _load_survey(cursor, cycle["survey_id"], include_scoring=True)
+            survey = _load_survey(
+                cursor,
+                cycle["survey_id"],
+                include_scoring=True,
+                cycle_id=cycle_id,
+            )
             if survey["status"] != "published":
                 raise ApiError("This survey is not available.", 409)
+            cursor.execute(
+                "INSERT IGNORE INTO cycle_targets (cycle_id, target_id) VALUES (%s, %s)",
+                (cycle_id, target_id),
+            )
             questions = [
                 question
                 for section in survey["sections"]

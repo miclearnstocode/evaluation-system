@@ -247,7 +247,7 @@ def _current_user() -> dict[str, Any] | None:
         cursor = conn.cursor(dictionary=True)
         user = fetch_one(
             cursor,
-            "SELECT id, email, role, campus_id, is_central_staff, active "
+            "SELECT id, email, role, campus_id, position_role, is_central_staff, active "
             "FROM users WHERE id = %s",
             (user_id,),
         )
@@ -314,21 +314,65 @@ def _cycle_is_closed(cycle: dict[str, Any]) -> bool:
     return cycle["status"] == "closed" and cycle["closes_at"] <= _utcnow_naive()
 
 
-def _load_survey(cursor: Any, survey_id: int, include_scoring: bool = False) -> dict[str, Any]:
+def _load_survey(
+    cursor: Any,
+    survey_id: int,
+    include_scoring: bool = False,
+    cycle_id: int | None = None,
+) -> dict[str, Any]:
     survey = fetch_one(cursor, "SELECT id, title, description, status FROM surveys WHERE id = %s", (survey_id,))
     if not survey:
         raise ApiError("Survey not found.", 404)
-    sections = fetch_all(cursor, "SELECT id, title, sort_order FROM sections WHERE survey_id = %s ORDER BY sort_order, id", (survey_id,))
+    if cycle_id is None:
+        sections = fetch_all(
+            cursor,
+            "SELECT s.id, s.title, s.sort_order FROM sections s "
+            "WHERE s.survey_id = %s AND EXISTS ("
+            "SELECT 1 FROM questions q WHERE q.section_id = s.id AND q.is_archived = 0"
+            ") ORDER BY s.sort_order, s.id",
+            (survey_id,),
+        )
+    else:
+        snapshot = fetch_one(
+            cursor,
+            "SELECT survey_title AS title, survey_description AS description "
+            "FROM cycle_survey_snapshots WHERE cycle_id = %s AND survey_id = %s",
+            (cycle_id, survey_id),
+        )
+        if not snapshot:
+            raise ApiError("The evaluation cycle's survey snapshot is missing.", 409)
+        survey["title"] = snapshot["title"]
+        survey["description"] = snapshot["description"]
+        sections = fetch_all(
+            cursor,
+            "SELECT DISTINCT section_id AS id, section_title AS title, section_order AS sort_order "
+            "FROM cycle_survey_questions WHERE cycle_id = %s "
+            "ORDER BY section_order, section_id",
+            (cycle_id,),
+        )
     for section in sections:
         score_column = ", weight AS score_weight" if include_scoring else ""
-        questions = fetch_all(
-            cursor,
-            "SELECT id, question_type AS type, prompt AS question_text, is_required AS required, "
-            "sort_order, scale_min, scale_max, min_label, max_label"
-            f"{score_column} "
-            "FROM questions WHERE section_id = %s AND is_archived = 0 ORDER BY sort_order, id",
-            (section["id"],),
-        )
+        if cycle_id is None:
+            questions = fetch_all(
+                cursor,
+                "SELECT id, question_type AS type, prompt AS question_text, is_required AS required, "
+                "sort_order, scale_min, scale_max, min_label, max_label"
+                f"{score_column} "
+                "FROM questions WHERE section_id = %s AND is_archived = 0 ORDER BY sort_order, id",
+                (section["id"],),
+            )
+        else:
+            questions = fetch_all(
+                cursor,
+                "SELECT q.id, q.question_type AS type, q.prompt AS question_text, "
+                "q.is_required AS required, csq.question_order AS sort_order, "
+                "q.scale_min, q.scale_max, q.min_label, q.max_label"
+                f"{score_column} "
+                "FROM cycle_survey_questions csq JOIN questions q ON q.id = csq.question_id "
+                "WHERE csq.cycle_id = %s AND csq.section_id = %s "
+                "ORDER BY csq.question_order, q.id",
+                (cycle_id, section["id"]),
+            )
         for question in questions:
             points_column = ", points" if include_scoring else ""
             question["options"] = fetch_all(

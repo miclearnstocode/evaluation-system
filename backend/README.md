@@ -11,6 +11,8 @@ For a visual relationship diagram and explanations of every table, view, and sto
 
 `database-schema.sql` is a fresh-install schema, not an in-place migration. Do not import it over a database containing existing tables or data. Back up the existing database and plan a data migration before switching an existing installation.
 
+For an existing installation, apply `migrations/20261123_cycle_survey_snapshots.sql` once before deploying the updated backend. It records the current question set for existing cycles so later survey edits do not change their forms or historical results.
+
 ## Install and run
 
 From the repository root in PowerShell:
@@ -40,14 +42,16 @@ The static frontend does not host the Flask API. Configure Bluehost or your API 
 
 Visit `/register` or select **Create evaluator account** on the sign-in page. Registration is limited to `@capsu.edu.ph` addresses and activates the account immediately. Enter your first and last name, then choose the role, up to three target assignments, campus/location, and service range. Names are saved to the `users` table. Role and service-range choices are provided by the backend; active campuses and targets come from the database. Assignments are stored in `user_office_assignments`.
 
-The **Office Being Evaluated** list contains eligible targets in an open evaluation cycle. Create and publish a question survey, then open a cycle to include all active targets from the six target categories.
+The evaluation page lists every active target in an open cycle for every evaluator, regardless of campus, role, or assignment. Evaluators can search and scroll the list. Super administrators can review the account email associated with each submission and retract a submission; retraction updates its aggregate counts and results.
+
+Administrators can view office-level mean scores only. Super administrators can also view section means and each evaluator's mean score. The live standing page refreshes open-cycle results every ten seconds.
 
 ## Backend layout
 
 - `app.py` creates the Flask app and installs middleware.
 - `routes/auth.py`, `routes/admin.py`, and `routes/evaluator.py` handle their respective HTTP endpoints.
 - `database.py` owns MySQL connections and query helpers.
-- `eligibility.py` applies cycle rules, campus/central conditions, and assigned-target self-evaluation exclusion.
+- `eligibility.py` contains cycle-rule matching for administrative participation reporting. Evaluator access is not filtered by profile, campus, or assignment.
 - `core.py` provides shared validation and API helpers to route modules.
 
 ## API groups
@@ -56,7 +60,11 @@ The **Office Being Evaluated** list contains eligible targets in an open evaluat
 - `GET /api/auth/registration-options`, `POST /api/auth/register`
 - `GET/POST/PATCH /api/admin/campuses`, `/offices`, `/administrators`
 - `GET/POST/PATCH/DELETE /api/admin/users`
-- `GET/POST/PUT /api/admin/surveys` plus publish and clone actions
+- Admin accounts manage campuses, offices, users, surveys, cycles, participation, comments, and audit records.
+- `GET /api/admin/standing` (aggregate mean for admins; section and evaluator means for super admins)
+- Super-admin accounts are results-only: `/super_admin/standing` and `/super_admin/results`.
+- `GET /api/admin/results/options` and `/api/admin/results` provide the cycle and target selections and detailed results for super admins.
+- `GET/POST/PUT /api/admin/surveys` plus publish; survey edits update the same survey row and preserve prior cycle snapshots
 - `GET/POST /api/admin/cycles` plus rule, open, and close actions
 - `GET /api/evaluator/targets`, `GET /api/evaluator/targets/{id}/form`
 - `POST /api/evaluator/submit` (final; response body and user are not logged)
@@ -64,15 +72,17 @@ The **Office Being Evaluated** list contains eligible targets in an open evaluat
 - `POST /api/admin/submissions/review`, `DELETE /api/admin/submissions`
 - `POST /api/admin/comments/{id}/moderate`
 
+Management endpoints require the `admin` role. The `super_admin` role can access only office standing and detailed results; it cannot manage system configuration or submissions.
+
 ## Production privacy and database permissions
 
-The participation ledger stores the evaluator account and a random submission token. Answers, comments, and score summaries refer to that token so they can be reviewed and retracted, but contain no user ID or email. The review endpoint queries answer/comment rows by token without joining `participation` or `users`; it redacts email addresses from free text and never returns the token with answer content. The delete endpoint retracts aggregate counts and deletes the participation row, which cascades to its linked answer, comment, and score rows. The account deletion path performs the same retraction for each of the evaluator's submissions.
+The participation ledger stores the evaluator account and a random submission token. Answers, comments, and score summaries refer to that token so they can be reviewed and retracted, but contain no user ID or email. The answer review endpoint queries answer/comment rows by token without joining `participation` or `users`; it redacts email addresses from free text and never returns the token with answer content. Only super admins can access evaluator-level mean scores and the office standing evaluator breakdown. The delete endpoint retracts aggregate counts and deletes the participation row, which cascades to its linked answer, comment, and score rows. The account deletion path performs the same retraction for each of the evaluator's submissions.
 
-The admin database account needs the permissions required by admin endpoints, including participation-token listing/deletion and answer/comment review. Restrict direct database access because the token can link a submission back to a participation row. The submit account needs setup-table reads and write access for participation, answers, scores, tallies, counts, and comments. Configure these separately with `ADMIN_DB_*` and `SUBMIT_DB_*`.
+The admin database account needs the permissions required by admin endpoints, including participation-token listing/deletion and answer/comment review. Restrict direct database access because the token can link a submission back to a participation row. The submit account needs setup-table reads, including `cycle_survey_snapshots` and `cycle_survey_questions`, and write access for `cycle_targets`, participation, answers, scores, tallies, counts, and comments. Evaluators can browse every target in the registry; when an evaluation is submitted, its target is linked to that cycle so administrative reporting includes it. Configure these separately with `ADMIN_DB_*` and `SUBMIT_DB_*`.
 
 Survey scoring is configurable: scale/rating and Yes answers use the selected value multiplied by the question weight; choice questions use configured option points; text answers are unscored. Section scores are summed for the total, and the mean is the total divided by the number of sections.
 
-The survey builder creates question sets only. Evaluation cycles can include every active target. Eligibility is controlled by cycle rules, campus/central conditions, and assigned-target self-evaluation exclusion; evaluator groups are not used.
+The survey builder creates question sets only. Evaluation cycles can include every active target. Evaluator access is not restricted by profile, campus, assignment, or cycle eligibility rules.
 
 Disable access/request logging for `/api/evaluator/submit` at every production proxy and server layer, and do not log its body, IP, user agent, or authenticated user. Restrict MySQL logs and backups. These controls reduce linkage but do not prevent timing correlation by a fully privileged server or database operator. Individual results are released after the first response as configured; free-text answers may identify their author by content, so email addresses are redacted before results are returned.
 

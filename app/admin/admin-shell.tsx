@@ -7,16 +7,19 @@ import { apiFetch } from "../lib/api";
 
 const links = [
   ["Dashboard", "/admin/dashboard"],
+  ["Live Office Standing", "/admin/standing"],
   ["Campuses", "/admin/campuses"],
   ["Evaluation Targets", "/admin/targets"],
   ["Users", "/admin/users"],
   ["Survey Builder", "/admin/survey-builder"],
   ["Cycles", "/admin/cycles"],
   ["Participation", "/admin/participation"],
-  ["Results", "/admin/results"],
+  ["Review Submissions", "/admin/submissions"],
   ["Comments", "/admin/comments"],
   ["Audit Log", "/admin/audit-log"],
 ];
+
+type AdminSession = { id: number; email: string; role: "admin" | "super_admin" | "evaluator" };
 
 function navigationLinkClass(isActive: boolean) {
   const base =
@@ -27,8 +30,6 @@ function navigationLinkClass(isActive: boolean) {
       : "text-white/75 hover:bg-[#0F9D8A] hover:text-white"
   }`;
 }
-
-type AdminSession = { id: number; email: string; role: "admin" | "evaluator" };
 
 export default function AdminShell({ children }: { children: ReactNode }) {
   const pathname = usePathname();
@@ -45,7 +46,7 @@ export default function AdminShell({ children }: { children: ReactNode }) {
       .then((session) => {
         if (!active) return;
         if (session.role !== "admin") {
-          router.replace("/");
+          router.replace(session.role === "super_admin" ? "/super_admin/standing" : "/");
           return;
         }
         setUser(session);
@@ -71,7 +72,8 @@ export default function AdminShell({ children }: { children: ReactNode }) {
     setLoggingOut(true);
     try {
       await apiFetch("/api/auth/logout", { method: "POST" });
-      router.replace("/");
+      setUser(null);
+      window.location.replace("/");
     } catch (error) {
       setSessionError(error instanceof Error ? error.message : "Could not sign out.");
     } finally {
@@ -95,7 +97,9 @@ export default function AdminShell({ children }: { children: ReactNode }) {
               </button>
             </>
           ) : (
-            <p role="status" className="text-sm text-slate-600">Checking administrator access…</p>
+            <p role="status" className="text-sm text-slate-600">
+              {user?.role === "admin" ? "Opening office standing…" : "Checking administrator access…"}
+            </p>
           )}
         </div>
       </main>

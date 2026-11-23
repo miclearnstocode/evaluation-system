@@ -1,5 +1,6 @@
 import json
 import re
+from decimal import Decimal, ROUND_HALF_UP
 
 from flask import Blueprint
 
@@ -27,6 +28,20 @@ def _redact_email_addresses(text: str) -> str:
         text,
         flags=re.IGNORECASE,
     )
+
+
+def _result_cycles(cursor: Any) -> list[dict[str, Any]]:
+    cycles = fetch_all(
+        cursor,
+        "SELECT id, title AS name, status, opens_at, closes_at "
+        "FROM eval_cycles WHERE status IN ('open', 'closed') "
+        "ORDER BY opens_at DESC, id DESC",
+    )
+    return [
+        cycle
+        for cycle in cycles
+        if cycle["status"] == "closed" or _cycle_is_open(cycle)
+    ]
 
 
 def _generated_code(name: str) -> str:
@@ -130,7 +145,7 @@ def _retract_submission(cursor: Any, submission_token: str) -> None:
 
 
 @bp.get("/api/admin/campuses")
-@require_role("super_admin")
+@require_role("admin")
 def list_campuses():
     with connection() as conn:
         cursor = conn.cursor(dictionary=True)
@@ -140,7 +155,7 @@ def list_campuses():
 
 
 @bp.post("/api/admin/campuses")
-@require_role("super_admin")
+@require_role("admin")
 def create_campus():
     payload = _json_body()
     code = str(payload.get("code", "")).strip().upper()
@@ -161,7 +176,7 @@ def create_campus():
 
 
 @bp.patch("/api/admin/campuses/<int:campus_id>")
-@require_role("super_admin")
+@require_role("admin")
 def update_campus(campus_id: int):
     payload = _json_body()
     allowed = {"code", "name", "is_central", "active"}
@@ -191,7 +206,7 @@ def update_campus(campus_id: int):
 
 
 @bp.get("/api/admin/offices")
-@require_role("super_admin")
+@require_role("admin")
 def list_offices():
     with connection() as conn:
         cursor = conn.cursor(dictionary=True)
@@ -208,7 +223,7 @@ def list_offices():
 
 
 @bp.post("/api/admin/offices")
-@require_role("super_admin")
+@require_role("admin")
 def create_office():
     payload = _json_body()
     campus_id = _positive_id(payload.get("campus_id"), "campus_id") if payload.get("campus_id") else None
@@ -241,7 +256,7 @@ def create_office():
 
 
 @bp.patch("/api/admin/offices/<int:office_id>")
-@require_role("super_admin")
+@require_role("admin")
 def update_office(office_id: int):
     payload = _json_body()
     allowed = {"name", "active"}
@@ -263,7 +278,7 @@ def update_office(office_id: int):
 
 
 @bp.get("/api/admin/administrators")
-@require_role("super_admin")
+@require_role("admin")
 def list_administrators():
     with connection() as conn:
         cursor = conn.cursor(dictionary=True)
@@ -280,7 +295,7 @@ def list_administrators():
 
 
 @bp.post("/api/admin/administrators")
-@require_role("super_admin")
+@require_role("admin")
 def create_administrator():
     payload = _json_body()
     office_id = _positive_id(payload.get("office_id"), "office_id")
@@ -315,7 +330,7 @@ def create_administrator():
 
 
 @bp.patch("/api/admin/administrators/<int:administrator_id>")
-@require_role("super_admin")
+@require_role("admin")
 def update_administrator(administrator_id: int):
     payload = _json_body()
     allowed = {"name", "active"}
@@ -340,24 +355,50 @@ def update_administrator(administrator_id: int):
 
 
 @bp.get("/api/admin/targets")
-@require_role("super_admin")
+@require_role()
 def list_targets():
+    if request_user()["role"] not in {"admin", "super_admin"}:
+        raise ApiError("You do not have permission to access this resource.", 403)
     with connection() as conn:
         cursor = conn.cursor(dictionary=True)
-        rows = fetch_all(
-            cursor,
-            "SELECT tc.id, tc.target_type, tc.campus_id, tc.is_central, "
-            "c.name AS campus_name, tc.name FROM target_catalog tc "
-            "LEFT JOIN campuses c ON c.id = tc.campus_id "
-            "WHERE tc.active = 1 AND (tc.campus_id IS NULL OR c.active = 1) "
-            "ORDER BY campus_name, tc.name",
-        )
+        if request_user()["role"] == "super_admin":
+            target_ids = {
+                target["target_id"]
+                for cycle in _result_cycles(cursor)
+                for target in fetch_all(
+                    cursor,
+                    "SELECT target_id FROM cycle_targets WHERE cycle_id = %s",
+                    (cycle["id"],),
+                )
+            }
+            rows = []
+            if target_ids:
+                placeholders = ", ".join(["%s"] * len(target_ids))
+                rows = fetch_all(
+                    cursor,
+                    "SELECT tc.id, tc.target_type, tc.campus_id, tc.is_central, "
+                    "c.name AS campus_name, tc.name FROM target_catalog tc "
+                    "LEFT JOIN campuses c ON c.id = tc.campus_id "
+                    f"WHERE tc.id IN ({placeholders}) AND tc.active = 1 "
+                    "AND (tc.campus_id IS NULL OR c.active = 1) "
+                    "ORDER BY campus_name, tc.name",
+                    tuple(target_ids),
+                )
+        else:
+            rows = fetch_all(
+                cursor,
+                "SELECT tc.id, tc.target_type, tc.campus_id, tc.is_central, "
+                "c.name AS campus_name, tc.name FROM target_catalog tc "
+                "LEFT JOIN campuses c ON c.id = tc.campus_id "
+                "WHERE tc.active = 1 AND (tc.campus_id IS NULL OR c.active = 1) "
+                "ORDER BY campus_name, tc.name",
+            )
         cursor.close()
     return jsonify(items=rows)
 
 
 @bp.get("/api/admin/users")
-@require_role("super_admin")
+@require_role("admin")
 def list_users():
     with connection() as conn:
         cursor = conn.cursor(dictionary=True)
@@ -377,7 +418,7 @@ def list_users():
 
 
 @bp.post("/api/admin/users")
-@require_role("super_admin")
+@require_role("admin")
 def create_user():
     payload = _json_body()
     email = payload.get("email")
@@ -387,16 +428,17 @@ def create_user():
         raise ApiError("A valid email is required.")
     if not isinstance(password, str) or len(password) < 12:
         raise ApiError("Password must contain at least 12 characters.")
-    if role != "super_admin":
-        raise ApiError("Evaluator accounts must be created through registration.")
+    if not isinstance(role, str) or role not in {"admin", "super_admin"}:
+        raise ApiError("Only admin and super-admin accounts can be created here.")
     with connection() as conn:
         cursor = conn.cursor()
         cursor.execute(
             "INSERT INTO users (email, password_hash, role, active) "
-            "VALUES (%s, %s, 'super_admin', 1)",
+            "VALUES (%s, %s, %s, 1)",
             (
                 email.strip().lower(),
                 generate_password_hash(password),
+                role,
             ),
         )
         user_id = cursor.lastrowid
@@ -406,7 +448,7 @@ def create_user():
 
 
 @bp.patch("/api/admin/users/<int:user_id>")
-@require_role("super_admin")
+@require_role("admin")
 def update_user(user_id: int):
     payload = _json_body()
     actor = request_user()
@@ -439,7 +481,7 @@ def update_user(user_id: int):
 
 
 @bp.delete("/api/admin/users/<int:user_id>")
-@require_role("super_admin")
+@require_role("admin")
 def delete_user(user_id: int):
     actor = request_user()
     with connection() as conn:
@@ -471,7 +513,7 @@ def delete_user(user_id: int):
 
 
 @bp.get("/api/admin/surveys")
-@require_role("super_admin")
+@require_role("admin")
 def list_surveys():
     with connection() as conn:
         cursor = conn.cursor(dictionary=True)
@@ -481,7 +523,7 @@ def list_surveys():
 
 
 @bp.post("/api/admin/surveys")
-@require_role("super_admin")
+@require_role("admin")
 def create_survey():
     payload = _json_body()
     title = str(payload.get("title", "")).strip()
@@ -503,7 +545,7 @@ def create_survey():
 
 
 @bp.get("/api/admin/surveys/<int:survey_id>")
-@require_role("super_admin")
+@require_role("admin")
 def get_survey(survey_id: int):
     with connection() as conn:
         cursor = conn.cursor(dictionary=True)
@@ -513,31 +555,35 @@ def get_survey(survey_id: int):
 
 
 @bp.put("/api/admin/surveys/<int:survey_id>")
-@require_role("super_admin")
+@require_role("admin")
 def update_survey(survey_id: int):
     payload = _json_body()
     title = str(payload.get("title", "")).strip()
     sections = validate_survey_payload(payload.get("sections"))
+    if not title or len(title) > 200:
+        raise ApiError("A survey title is required.")
     with connection() as conn:
         cursor = conn.cursor(dictionary=True)
-        survey = fetch_one(cursor, "SELECT id, status FROM surveys WHERE id = %s", (survey_id,))
+        survey = fetch_one(cursor, "SELECT id, status FROM surveys WHERE id = %s FOR UPDATE", (survey_id,))
         if not survey:
             raise ApiError("Survey not found.", 404)
-        if survey["status"] != "draft":
-            raise ApiError("Published surveys are locked. Clone the survey to make changes.", 409)
         cursor.execute(
             "UPDATE surveys SET title = %s, description = %s WHERE id = %s",
             (title, str(payload.get("description", "")).strip() or None, survey_id),
         )
-        cursor.execute("DELETE FROM sections WHERE survey_id = %s", (survey_id,))
+        cursor.execute(
+            "UPDATE questions SET is_archived = 1 "
+            "WHERE survey_id = %s AND is_archived = 0",
+            (survey_id,),
+        )
         _insert_survey_content(cursor, survey_id, sections)
         conn.commit()
         cursor.close()
-    return jsonify(status="ok")
+    return jsonify(status="updated")
 
 
 @bp.post("/api/admin/surveys/<int:survey_id>/publish")
-@require_role("super_admin")
+@require_role("admin")
 def publish_survey(survey_id: int):
     with connection() as conn:
         cursor = conn.cursor(dictionary=True)
@@ -556,7 +602,7 @@ def publish_survey(survey_id: int):
 
 
 @bp.post("/api/admin/surveys/<int:survey_id>/clone")
-@require_role("super_admin")
+@require_role("admin")
 def clone_survey(survey_id: int):
     with connection() as conn:
         cursor = conn.cursor(dictionary=True)
@@ -605,16 +651,22 @@ def clone_survey(survey_id: int):
 
 
 @bp.get("/api/admin/cycles")
-@require_role("super_admin")
+@require_role()
 def list_cycles():
+    actor = request_user()
+    if actor["role"] not in {"admin", "super_admin"}:
+        raise ApiError("You do not have permission to access this resource.", 403)
     with connection() as conn:
         cursor = conn.cursor(dictionary=True)
-        rows = fetch_all(
-            cursor,
-            "SELECT c.id, c.survey_id, c.target_type, c.title AS name, c.opens_at, c.closes_at, c.status, "
-            "c.min_responses, c.allow_same_campus, s.title AS survey_title "
-            "FROM eval_cycles c JOIN surveys s ON s.id = c.survey_id ORDER BY c.id DESC",
-        )
+        if actor["role"] == "super_admin":
+            rows = _result_cycles(cursor)
+        else:
+            rows = fetch_all(
+                cursor,
+                "SELECT c.id, c.survey_id, c.target_type, c.title AS name, c.opens_at, c.closes_at, c.status, "
+                "c.min_responses, c.allow_same_campus, s.title AS survey_title "
+                "FROM eval_cycles c JOIN surveys s ON s.id = c.survey_id ORDER BY c.id DESC",
+            )
         for row in rows:
             row["target_ids"] = [
                 target["target_id"]
@@ -625,7 +677,7 @@ def list_cycles():
 
 
 @bp.post("/api/admin/cycles")
-@require_role("super_admin")
+@require_role("admin")
 def create_cycle():
     payload = _json_body()
     survey_id = _positive_id(payload.get("survey_id"), "survey_id")
@@ -636,7 +688,7 @@ def create_cycle():
         raise ApiError("Provide a cycle name and a valid time window.")
     with connection() as conn:
         cursor = conn.cursor(dictionary=True)
-        survey = fetch_one(cursor, "SELECT id, status FROM surveys WHERE id = %s", (survey_id,))
+        survey = fetch_one(cursor, "SELECT id, status FROM surveys WHERE id = %s FOR UPDATE", (survey_id,))
         if not survey or survey["status"] != "published":
             raise ApiError("Choose a published survey.", 409)
         allow_same = _bool_value(payload.get("allow_same_campus", True), "allow_same_campus")
@@ -646,6 +698,21 @@ def create_cycle():
             (survey_id, name, opens_at, closes_at, current_app.config["MIN_RESULT_COUNT"], allow_same),
         )
         cycle_id = cursor.lastrowid
+        cursor.execute(
+            "INSERT INTO cycle_survey_snapshots "
+            "(cycle_id, survey_id, survey_title, survey_description) "
+            "SELECT %s, id, title, description FROM surveys WHERE id = %s",
+            (cycle_id, survey_id),
+        )
+        cursor.execute(
+            "INSERT INTO cycle_survey_questions "
+            "(cycle_id, question_id, section_id, section_title, section_order, question_order) "
+            "SELECT %s, q.id, s.id, s.title, s.sort_order, q.sort_order "
+            "FROM questions q JOIN sections s ON s.id = q.section_id "
+            "WHERE q.survey_id = %s AND q.is_archived = 0 "
+            "ORDER BY s.sort_order, s.id, q.sort_order, q.id",
+            (cycle_id, survey_id),
+        )
         _insert_all_cycle_targets(cursor, cycle_id)
         _insert_default_rules(cursor, cycle_id, allow_same)
         conn.commit()
@@ -654,7 +721,7 @@ def create_cycle():
 
 
 @bp.put("/api/admin/cycles/<int:cycle_id>/rules")
-@require_role("super_admin")
+@require_role("admin")
 def update_cycle_rules(cycle_id: int):
     payload = _json_body()
     rules = payload.get("rules")
@@ -703,7 +770,7 @@ def update_cycle_rules(cycle_id: int):
 
 
 @bp.post("/api/admin/cycles/<int:cycle_id>/open")
-@require_role("super_admin")
+@require_role("admin")
 def open_cycle(cycle_id: int):
     with connection() as conn:
         cursor = conn.cursor(dictionary=True)
@@ -727,7 +794,7 @@ def open_cycle(cycle_id: int):
 
 
 @bp.post("/api/admin/cycles/<int:cycle_id>/close")
-@require_role("super_admin")
+@require_role("admin")
 def close_cycle(cycle_id: int):
     with connection() as conn:
         cursor = conn.cursor(dictionary=True)
@@ -745,7 +812,7 @@ def close_cycle(cycle_id: int):
 
 
 @bp.get("/api/admin/participation")
-@require_role("super_admin")
+@require_role("admin")
 def participation_report():
     cycle_id = _positive_id(request.args.get("cycle_id"), "cycle_id")
     actor = request_user()
@@ -766,25 +833,158 @@ def participation_report():
             "WHERE ct.cycle_id = %s ORDER BY target_name",
             (cycle_id,),
         )
-        rules = _load_rules(cursor, cycle_id)
         evaluators = fetch_all(
             cursor,
-            "SELECT id, campus_id, is_central_staff FROM users "
-            "WHERE role = 'evaluator' AND active = 1",
+            "SELECT id FROM users WHERE role = 'evaluator' AND active = 1",
         )
         for target in targets:
-            target["eligible"] = sum(
-                _cycle_user_eligible(cursor, cycle_id, evaluator, target, rules)
-                for evaluator in evaluators
-            )
+            target["eligible"] = len(evaluators)
             target["percent"] = round(target["submitted"] * 100 / target["eligible"]) if target["eligible"] else 0
         conn.commit()
         cursor.close()
     return jsonify(cycle=cycle, items=targets)
 
 
+def _average_scores(scores: list[Decimal]) -> float | None:
+    if not scores:
+        return None
+    average = sum(scores, Decimal("0")) / Decimal(len(scores))
+    return float(average.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP))
+
+
+@bp.get("/api/admin/standing")
+@require_role()
+def office_standing():
+    actor = request_user()
+    if actor["role"] not in {"admin", "super_admin"}:
+        raise ApiError("You do not have permission to access this resource.", 403)
+
+    with connection() as conn:
+        cursor = conn.cursor(dictionary=True)
+        cycles = fetch_all(
+            cursor,
+            "SELECT id, title AS name, survey_id, status, opens_at, closes_at "
+            "FROM eval_cycles WHERE status IN ('open', 'closed') "
+            "ORDER BY opens_at DESC, id DESC",
+        )
+        cycles = [
+            cycle
+            for cycle in cycles
+            if cycle["status"] == "closed" or _cycle_is_open(cycle)
+        ]
+        if not cycles:
+            cursor.close()
+            return jsonify(role=actor["role"], cycles=[], selected_cycle_id=None, items=[])
+
+        requested_cycle_id = request.args.get("cycle_id")
+        if requested_cycle_id:
+            selected_cycle_id = _positive_id(requested_cycle_id, "cycle_id")
+            cycle = next((item for item in cycles if item["id"] == selected_cycle_id), None)
+            if not cycle:
+                raise ApiError("Cycle not found or not available.", 404)
+        else:
+            cycle = next((item for item in cycles if item["status"] == "open"), cycles[0])
+
+        cycle_options = [
+            {"id": item["id"], "name": item["name"], "status": item["status"]}
+            for item in cycles
+        ]
+        sections = []
+        if actor["role"] == "super_admin":
+            sections = fetch_all(
+                cursor,
+                "SELECT id, title FROM sections WHERE survey_id = %s ORDER BY sort_order, id",
+                (cycle["survey_id"],),
+            )
+            score_rows = fetch_all(
+                cursor,
+                "SELECT ers.target_id, ers.mean_score, ers.section_scores, "
+                "u.email AS evaluator_email "
+                "FROM evaluator_response_scores ers "
+                "JOIN participation p ON p.submission_token = ers.score_link_token "
+                "JOIN users u ON u.id = p.user_id "
+                "WHERE ers.cycle_id = %s ORDER BY ers.target_id, p.submitted_at",
+                (cycle["id"],),
+            )
+        else:
+            score_rows = fetch_all(
+                cursor,
+                "SELECT target_id, mean_score FROM evaluator_response_scores "
+                "WHERE cycle_id = %s ORDER BY target_id",
+                (cycle["id"],),
+            )
+        targets = fetch_all(
+            cursor,
+            "SELECT t.id AS target_id, tc.name AS target_name, tc.target_type, "
+            "tc.campus_id, t.is_central, c.name AS campus_name "
+            "FROM cycle_targets ct JOIN targets t ON t.id = ct.target_id "
+            "JOIN target_catalog tc ON tc.id = t.id "
+            "LEFT JOIN campuses c ON c.id = tc.campus_id "
+            "WHERE ct.cycle_id = %s AND t.active = 1 "
+            "AND (tc.campus_id IS NULL OR c.active = 1) ORDER BY tc.name",
+            (cycle["id"],),
+        )
+
+        scores_by_target: dict[int, list[dict[str, Any]]] = {}
+        for row in score_rows:
+            scores_by_target.setdefault(row["target_id"], []).append(row)
+
+        items = []
+        section_ids = {section["id"] for section in sections}
+        for target in targets:
+            target_scores = scores_by_target.get(target["target_id"], [])
+            item = {
+                **target,
+                "office_mean_score": _average_scores(
+                    [Decimal(str(row["mean_score"])) for row in target_scores]
+                ),
+            }
+            if actor["role"] == "super_admin":
+                item["response_count"] = len(target_scores)
+                section_values: dict[int, list[Decimal]] = {
+                    section_id: [] for section_id in section_ids
+                }
+                for row in target_scores:
+                    section_scores = row["section_scores"]
+                    if isinstance(section_scores, str):
+                        section_scores = json.loads(section_scores)
+                    for section_score in section_scores:
+                        section_id = section_score["section_id"]
+                        if section_id in section_values:
+                            section_values[section_id].append(
+                                Decimal(str(section_score["score"]))
+                            )
+                item["section_means"] = [
+                    {
+                        "section_id": section["id"],
+                        "title": section["title"],
+                        "mean_score": _average_scores(section_values[section["id"]]),
+                    }
+                    for section in sections
+                ]
+                item["evaluator_means"] = [
+                    {
+                        "email": row["evaluator_email"],
+                        "mean_score": float(row["mean_score"]),
+                    }
+                    for row in target_scores
+                ]
+            items.append(item)
+
+        _audit(cursor, actor, "view", "office_standing", cycle["id"])
+        conn.commit()
+        cursor.close()
+
+    return jsonify(
+        role=actor["role"],
+        cycles=cycle_options,
+        selected_cycle_id=cycle["id"],
+        items=items,
+    )
+
+
 @bp.get("/api/admin/submissions")
-@require_role("super_admin")
+@require_role("admin")
 def list_submissions():
     cycle_id = _positive_id(request.args.get("cycle_id"), "cycle_id")
     target_id = _positive_id(request.args.get("target_id"), "target_id")
@@ -802,8 +1002,9 @@ def list_submissions():
             raise ApiError("Target not found in this cycle.", 404)
         items = fetch_all(
             cursor,
-            "SELECT submission_token, submitted_at FROM participation "
-            "WHERE cycle_id = %s AND target_id = %s ORDER BY submitted_at DESC",
+            "SELECT p.submission_token, p.submitted_at, u.email AS evaluator_email "
+            "FROM participation p JOIN users u ON u.id = p.user_id "
+            "WHERE p.cycle_id = %s AND p.target_id = %s ORDER BY p.submitted_at DESC",
             (cycle_id, target_id),
         )
         _audit(cursor, actor, "view", "submission_list", f"{cycle_id}:{target_id}")
@@ -813,7 +1014,7 @@ def list_submissions():
 
 
 @bp.post("/api/admin/submissions/review")
-@require_role("super_admin")
+@require_role("admin")
 def review_submission():
     payload = _json_body()
     try:
@@ -887,7 +1088,7 @@ def review_submission():
 
 
 @bp.delete("/api/admin/submissions")
-@require_role("super_admin")
+@require_role("admin")
 def delete_submission():
     payload = _json_body()
     try:
@@ -916,6 +1117,47 @@ def delete_submission():
         finally:
             cursor.close()
     return jsonify(status="deleted")
+
+
+@bp.get("/api/admin/results/options")
+@require_role("super_admin")
+def results_options():
+    with connection() as conn:
+        cursor = conn.cursor(dictionary=True)
+        cycles = _result_cycles(cursor)
+        for cycle in cycles:
+            cycle["target_ids"] = [
+                target["target_id"]
+                for target in fetch_all(
+                    cursor,
+                    "SELECT target_id FROM cycle_targets WHERE cycle_id = %s",
+                    (cycle["id"],),
+                )
+            ]
+        target_ids = sorted(
+            {target_id for cycle in cycles for target_id in cycle["target_ids"]}
+        )
+        targets = []
+        if target_ids:
+            placeholders = ", ".join(["%s"] * len(target_ids))
+            targets = fetch_all(
+                cursor,
+                "SELECT tc.id, tc.name, tc.target_type, tc.campus_id, "
+                "tc.is_central, c.name AS campus_name "
+                "FROM target_catalog tc LEFT JOIN campuses c ON c.id = tc.campus_id "
+                f"WHERE tc.id IN ({placeholders}) AND tc.active = 1 "
+                "AND (tc.campus_id IS NULL OR c.active = 1) ORDER BY tc.name",
+                tuple(target_ids),
+            )
+        available_ids = {target["id"] for target in targets}
+        for cycle in cycles:
+            cycle["target_ids"] = [
+                target_id
+                for target_id in cycle["target_ids"]
+                if target_id in available_ids
+            ]
+        cursor.close()
+    return jsonify(cycles=cycles, targets=targets)
 
 
 @bp.get("/api/admin/results")
@@ -951,7 +1193,7 @@ def results():
             conn.commit()
             cursor.close()
             return jsonify(released=False, minimum=threshold, response_count=total)
-        survey = _load_survey(cursor, cycle["survey_id"])
+        survey = _load_survey(cursor, cycle["survey_id"], cycle_id=cycle_id)
         answer_rows = fetch_all(
             cursor,
             "SELECT response_id, question_id, answer_value, score AS question_score "
@@ -1082,7 +1324,7 @@ def results():
 
 
 @bp.get("/api/admin/comments")
-@require_role("super_admin")
+@require_role("admin")
 def list_comments():
     cycle_id = _positive_id(request.args.get("cycle_id"), "cycle_id")
     target_id = _positive_id(request.args.get("target_id"), "target_id")
@@ -1122,7 +1364,7 @@ def list_comments():
 
 
 @bp.post("/api/admin/comments/<int:comment_id>/moderate")
-@require_role("super_admin")
+@require_role("admin")
 def moderate_comment(comment_id: int):
     payload = _json_body()
     status = payload.get("status")
@@ -1155,7 +1397,7 @@ def moderate_comment(comment_id: int):
 
 
 @bp.get("/api/admin/audit-log")
-@require_role("super_admin")
+@require_role("admin")
 def audit_log():
     with connection() as conn:
         cursor = conn.cursor(dictionary=True)
