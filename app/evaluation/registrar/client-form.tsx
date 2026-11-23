@@ -2,7 +2,6 @@
 
 import { FormEvent, useEffect, useState } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import { apiFetch } from "../../lib/api";
 import EvaluatorHeader from "../evaluator-header";
 
@@ -40,8 +39,47 @@ type EvaluationFormData = {
 };
 
 type Answer = string | number | boolean | number[];
+type SubmissionResult = {
+  total_score: number;
+  mean_score: number;
+  section_scores: { section_id: number; title: string; score: number }[];
+  question_scores: Record<string, number | null>;
+};
 
 const FOCUS_RING = "peer-focus-visible:ring-4 peer-focus-visible:ring-teal-600/25";
+
+function isSubmissionResult(value: unknown): value is SubmissionResult {
+  if (typeof value !== "object" || value === null) return false;
+  const result = value as Record<string, unknown>;
+  if (
+    typeof result.total_score !== "number" ||
+    !Number.isFinite(result.total_score) ||
+    typeof result.mean_score !== "number" ||
+    !Number.isFinite(result.mean_score) ||
+    !Array.isArray(result.section_scores) ||
+    typeof result.question_scores !== "object" ||
+    result.question_scores === null
+  ) {
+    return false;
+  }
+  return (
+    result.section_scores.every(
+      (section) =>
+        typeof section === "object" &&
+        section !== null &&
+        "section_id" in section &&
+        typeof section.section_id === "number" &&
+        "title" in section &&
+        typeof section.title === "string" &&
+        "score" in section &&
+        typeof section.score === "number" &&
+        Number.isFinite(section.score),
+    ) &&
+    Object.values(result.question_scores).every(
+      (score) => score === null || (typeof score === "number" && Number.isFinite(score)),
+    )
+  );
+}
 
 function isAnswered(answer: Answer | undefined) {
   if (answer === undefined || answer === null) return false;
@@ -65,9 +103,10 @@ export default function EvaluationForm({
   cycleId: string;
   targetId: string;
 }) {
-  const router = useRouter();
   const [form, setForm] = useState<EvaluationFormData | null>(null);
   const [answers, setAnswers] = useState<Record<number, Answer>>({});
+  const [submitted, setSubmitted] = useState(false);
+  const [submissionResult, setSubmissionResult] = useState<SubmissionResult | null>(null);
   const [error, setError] = useState(
     cycleId && targetId ? "" : "Choose an evaluation from My Evaluations first.",
   );
@@ -118,7 +157,7 @@ export default function EvaluationForm({
     setError("");
     setSubmitting(true);
     try {
-      await apiFetch("/api/evaluator/submit", {
+      const result = await apiFetch<unknown>("/api/evaluator/submit", {
         method: "POST",
         body: JSON.stringify({
           cycle_id: form.cycle_id,
@@ -126,7 +165,8 @@ export default function EvaluationForm({
           answers,
         }),
       });
-      router.push("/evaluation/thank-you");
+      setSubmissionResult(isSubmissionResult(result) ? result : null);
+      setSubmitted(true);
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : "The evaluation could not be submitted.");
     } finally {
@@ -154,7 +194,9 @@ export default function EvaluationForm({
         <div className="mb-4 flex items-start justify-between gap-3">
           <h3 className="text-[15px] font-semibold leading-6 text-slate-900">
             {question.question_text}
-            {question.required && <span className="ml-1 text-red-600" aria-label="required">*</span>}
+            {question.required ? (
+              <span className="ml-1 text-red-600" aria-label="required">*</span>
+            ) : null}
           </h3>
           {isAnswered(current) && (
             <span className="mt-0.5 inline-flex shrink-0 items-center gap-1 rounded-full bg-teal-50 px-2 py-0.5 text-[11px] font-semibold text-teal-700 ring-1 ring-teal-600/20">
@@ -167,7 +209,8 @@ export default function EvaluationForm({
         {(question.type === "scale" || question.type === "rating") && (() => {
           const min = question.scale_min ?? 1;
           const max = question.scale_max ?? 5;
-          const values = Array.from({ length: max - min + 1 }, (_, index) => min + index);
+          const values = Array.from({ length: max - min + 1 }, (_, index) => min + index)
+            .filter((value) => value !== 0);
           return (
             <div className="max-w-xl">
               <div
@@ -192,7 +235,7 @@ export default function EvaluationForm({
                       <span
                         className={`flex h-14 items-center justify-center rounded-xl border text-base font-semibold transition ${FOCUS_RING} ${
                           isSelected
-                            ? "scale-105 border-[#0F9D8A] bg-gradient-to-b from-[#12AC97] to-[#0F9D8A] text-white shadow-md shadow-teal-600/25"
+                            ? "scale-105 border-[#0F9D8A] bg-linear-to-b from-[#12AC97] to-[#0F9D8A] text-white shadow-md shadow-teal-600/25"
                             : "border-slate-300 bg-white text-slate-700 hover:border-teal-500 hover:bg-teal-50"
                         }`}
                       >
@@ -286,7 +329,7 @@ export default function EvaluationForm({
                   <span
                     className={`flex min-w-28 items-center justify-center gap-1.5 rounded-xl border px-6 py-3 text-sm font-semibold transition ${FOCUS_RING} ${
                       isSelected
-                        ? "border-[#0F9D8A] bg-gradient-to-b from-[#12AC97] to-[#0F9D8A] text-white shadow-md shadow-teal-600/25"
+                        ? "border-[#0F9D8A] bg-linear-to-b from-[#12AC97] to-[#0F9D8A] text-white shadow-md shadow-teal-600/25"
                         : "border-slate-300 bg-white text-slate-700 hover:border-teal-500 hover:bg-teal-50"
                     }`}
                   >
@@ -328,7 +371,7 @@ export default function EvaluationForm({
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 via-white to-teal-50/40 text-slate-900">
+    <div className="min-h-screen bg-linear-to-br from-slate-50 via-white to-teal-50/40 text-slate-900">
       <EvaluatorHeader currentPage="form" />
       <main className="mx-auto max-w-3xl space-y-6 px-5 py-8 sm:py-10">
         {loading ? (
@@ -358,6 +401,83 @@ export default function EvaluationForm({
               Return to My Evaluations
             </Link>
           </div>
+        ) : form && submitted ? (
+          <section className="space-y-6 rounded-3xl border border-slate-200 bg-white p-6 shadow-lg shadow-slate-200/50 sm:p-8">
+            <div className="text-center">
+              <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-teal-50 text-2xl font-bold text-teal-800" aria-hidden="true">
+                ✓
+              </div>
+              <h1 className="mt-4 text-2xl font-bold tracking-tight text-[#1F3A5F]">
+                Evaluation submitted
+              </h1>
+              <p className="mt-2 text-sm leading-6 text-slate-600">
+                Thank you for your feedback. Your evaluation has been recorded.
+              </p>
+            </div>
+
+            {submissionResult ? (
+              <>
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <div className="rounded-2xl bg-teal-50 p-5 text-center">
+                    <p className="text-sm font-medium text-teal-900">Mean score</p>
+                    <p className="mt-2 text-3xl font-bold text-teal-950">
+                      {submissionResult.mean_score.toFixed(2)}
+                    </p>
+                  </div>
+                  <div className="rounded-2xl bg-slate-50 p-5 text-center">
+                    <p className="text-sm font-medium text-slate-700">Total score</p>
+                    <p className="mt-2 text-3xl font-bold text-slate-900">
+                      {submissionResult.total_score.toFixed(2)}
+                    </p>
+                  </div>
+                </div>
+
+                {form.sections.map((section) => {
+                  const sectionScore = submissionResult.section_scores.find(
+                    (score) => score.section_id === section.id,
+                  );
+                  return (
+                    <section key={section.id} className="overflow-hidden rounded-2xl border border-slate-200">
+                      <header className="flex items-center justify-between gap-4 bg-slate-50 px-5 py-3">
+                        <h2 className="font-semibold text-[#1F3A5F]">{section.title}</h2>
+                        <span className="text-sm font-semibold text-slate-700">
+                          Section score: {sectionScore?.score.toFixed(2) ?? "0.00"}
+                        </span>
+                      </header>
+                      <ul className="divide-y divide-slate-100 px-5">
+                        {section.questions.map((question) => {
+                          const score = submissionResult.question_scores[String(question.id)];
+                          const scoreLabel =
+                            question.type === "text"
+                              ? "Not scored"
+                              : typeof score === "number"
+                                ? `${score.toFixed(2)} points`
+                                : "Not answered";
+                          return (
+                            <li key={question.id} className="flex items-start justify-between gap-4 py-3 text-sm">
+                              <span className="text-slate-700">{question.question_text}</span>
+                              <span className="shrink-0 font-semibold text-slate-900">{scoreLabel}</span>
+                            </li>
+                          );
+                        })}
+                      </ul>
+                    </section>
+                  );
+                })}
+              </>
+            ) : (
+              <p role="status" className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+                Your evaluation was submitted, but score details were not returned. Restart the backend before the next evaluation to enable score display.
+              </p>
+            )}
+
+            <Link
+              href="/evaluation"
+              className="inline-flex w-full justify-center rounded-lg bg-[#0F9D8A] px-5 py-3 text-sm font-semibold text-white transition hover:bg-[#0C8575]"
+            >
+              Back to My Evaluations
+            </Link>
+          </section>
         ) : form ? (
           <>
             <Link
@@ -373,7 +493,7 @@ export default function EvaluationForm({
 
             {/* Hero */}
             <section className="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-lg shadow-slate-200/50">
-              <div className="relative overflow-hidden bg-gradient-to-br from-[#1F3A5F] via-[#1a4a5f] to-[#0F9D8A] px-6 py-7 text-white sm:px-8 sm:py-8">
+              <div className="relative overflow-hidden bg-linear-to-br from-[#1F3A5F] via-[#1a4a5f] to-[#0F9D8A] px-6 py-7 text-white sm:px-8 sm:py-8">
                 <div className="pointer-events-none absolute -right-16 -top-16 h-48 w-48 rounded-full bg-white/10 blur-2xl" aria-hidden="true" />
                 <div className="pointer-events-none absolute -bottom-20 -left-16 h-56 w-56 rounded-full bg-teal-300/20 blur-3xl" aria-hidden="true" />
                 <div className="relative">
@@ -394,7 +514,7 @@ export default function EvaluationForm({
                 {form.description && (
                   <p className="text-sm leading-6 text-slate-600">{form.description}</p>
                 )}
-                <div className="mt-5 flex items-start gap-3 rounded-2xl border border-teal-200 bg-gradient-to-r from-teal-50 to-white px-4 py-3.5">
+                <div className="mt-5 flex items-start gap-3 rounded-2xl border border-teal-200 bg-linear-to-r from-teal-50 to-white px-4 py-3.5">
                   <span aria-hidden="true" className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-white text-teal-700 ring-1 ring-teal-600/20">
                     <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4">
                       <circle cx="12" cy="12" r="10" />
@@ -436,7 +556,7 @@ export default function EvaluationForm({
                 aria-valuenow={progress}
               >
                 <div
-                  className="h-full rounded-full bg-gradient-to-r from-[#1F3A5F] via-[#12AC97] to-[#0F9D8A] transition-all duration-500"
+                  className="h-full rounded-full bg-linear-to-r from-[#1F3A5F] via-[#12AC97] to-[#0F9D8A] transition-all duration-500"
                   style={{ width: `${progress}%` }}
                 />
               </div>
@@ -446,7 +566,7 @@ export default function EvaluationForm({
               {form.sections.map((section, index) => (
                 <section key={section.id} className="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm">
                   <header className="flex items-center gap-3 border-b border-slate-100 bg-slate-50/60 px-6 py-4 sm:px-8">
-                    <span aria-hidden="true" className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-[#1F3A5F] to-[#0F9D8A] text-sm font-bold text-white shadow-sm">
+                    <span aria-hidden="true" className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-linear-to-br from-[#1F3A5F] to-[#0F9D8A] text-sm font-bold text-white shadow-sm">
                       {index + 1}
                     </span>
                     <div>
@@ -483,7 +603,7 @@ export default function EvaluationForm({
                   <button
                     type="submit"
                     disabled={submitting}
-                    className="group inline-flex items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-[#0F9D8A] to-[#0C8575] px-7 py-3.5 text-sm font-semibold text-white shadow-lg shadow-teal-600/20 transition hover:shadow-teal-600/30 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-teal-600/30 disabled:cursor-wait disabled:opacity-70 disabled:shadow-none"
+                    className="group inline-flex items-center justify-center gap-2 rounded-xl bg-linear-to-r from-[#0F9D8A] to-[#0C8575] px-7 py-3.5 text-sm font-semibold text-white shadow-lg shadow-teal-600/20 transition hover:shadow-teal-600/30 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-teal-600/30 disabled:cursor-wait disabled:opacity-70 disabled:shadow-none"
                   >
                     {submitting ? (
                       <>

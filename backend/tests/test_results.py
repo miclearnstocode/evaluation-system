@@ -3,6 +3,8 @@ from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from unittest.mock import patch
 
+from mysql.connector import IntegrityError
+
 from backend.app import create_app
 from backend.core import _load_survey
 
@@ -36,7 +38,7 @@ class ResultsConnection:
 
 
 class AdminResultsTests(unittest.TestCase):
-    def test_cycle_survey_loader_uses_the_immutable_question_snapshot(self):
+    def test_cycle_survey_loader_reads_active_sections_and_questions(self):
         cursor = ResultsCursor()
         survey = {
             "id": 4,
@@ -44,16 +46,12 @@ class AdminResultsTests(unittest.TestCase):
             "description": "Current description",
             "status": "published",
         }
-        snapshot = {
-            "title": "Historical title",
-            "description": "Historical description",
-        }
-        sections = [{"id": 8, "title": "Historical section", "sort_order": 0}]
+        sections = [{"id": 8, "title": "Service", "sort_order": 0}]
         questions = [{
             "id": 9,
             "type": "scale",
-            "question_text": "Historical question",
-            "required": True,
+            "question_text": "Current question",
+            "required": 0,
             "sort_order": 0,
             "scale_min": 1,
             "scale_max": 5,
@@ -63,15 +61,24 @@ class AdminResultsTests(unittest.TestCase):
         }]
         options = []
 
-        with patch("backend.core.fetch_one", side_effect=[survey, snapshot]), patch(
+        with patch("backend.core.fetch_one", return_value=survey), patch(
             "backend.core.fetch_all", side_effect=[sections, questions, options]
         ) as fetch_all:
-            loaded = _load_survey(cursor, 4, include_scoring=True, cycle_id=3)
+            loaded = _load_survey(cursor, 4, include_scoring=True)
 
-        self.assertEqual(loaded["title"], "Historical title")
-        self.assertEqual(loaded["description"], "Historical description")
-        self.assertEqual(loaded["sections"][0]["questions"][0]["question_text"], "Historical question")
-        self.assertIn("cycle_survey_questions", fetch_all.call_args_list[1].args[1])
+        self.assertEqual(loaded["title"], "Current title")
+        self.assertEqual(loaded["description"], "Current description")
+        self.assertEqual(loaded["sections"][0]["questions"][0]["question_text"], "Current question")
+        self.assertIs(loaded["sections"][0]["questions"][0]["required"], False)
+        self.assertIn("FROM sections", fetch_all.call_args_list[0].args[1])
+        self.assertIn("FROM questions", fetch_all.call_args_list[1].args[1])
+        self.assertTrue(
+            all(
+                "cycle_survey_snapshots" not in call.args[1]
+                and "cycle_survey_questions" not in call.args[1]
+                for call in fetch_all.call_args_list
+            )
+        )
 
     def test_standing_is_restricted_to_admin_and_super_admin_accounts(self):
         app = create_app({"SECRET_KEY": "test-secret", "TESTING": True})
@@ -129,8 +136,8 @@ class AdminResultsTests(unittest.TestCase):
         ), patch("backend.routes.admin.connection", fake_connection), patch(
             "backend.routes.admin.fetch_one", return_value={"id": 5, "status": "draft"}
         ), patch("backend.routes.admin.validate_survey_payload", return_value=sections), patch(
-            "backend.routes.admin._insert_survey_content"
-        ) as insert_content:
+            "backend.routes.admin._update_survey_content"
+        ) as update_content:
             client = app.test_client()
             with client.session_transaction() as session:
                 session["user_id"] = 2
@@ -142,9 +149,8 @@ class AdminResultsTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.get_json(), {"status": "updated"})
         self.assertTrue(any("UPDATE surveys SET title" in query for query, _ in connection.db_cursor.executed))
-        self.assertTrue(any("UPDATE questions SET is_archived = 1" in query for query, _ in connection.db_cursor.executed))
         self.assertTrue(all("DELETE FROM sections" not in query for query, _ in connection.db_cursor.executed))
-        insert_content.assert_called_once_with(connection.db_cursor, 5, sections)
+        update_content.assert_called_once_with(connection.db_cursor, 5, sections)
 
     def test_published_survey_updates_in_place_and_preserves_old_questions(self):
         app = create_app({"SECRET_KEY": "test-secret", "TESTING": True})
@@ -161,8 +167,8 @@ class AdminResultsTests(unittest.TestCase):
             "backend.routes.admin.fetch_one",
             return_value={"id": 5, "status": "published"},
         ), patch("backend.routes.admin.validate_survey_payload", return_value=sections), patch(
-            "backend.routes.admin._insert_survey_content"
-        ) as insert_content:
+            "backend.routes.admin._update_survey_content"
+        ) as update_content:
             client = app.test_client()
             with client.session_transaction() as session:
                 session["user_id"] = 2
@@ -174,9 +180,80 @@ class AdminResultsTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.get_json(), {"status": "updated"})
         self.assertTrue(any("UPDATE surveys SET title" in query for query, _ in connection.db_cursor.executed))
-        self.assertTrue(any("UPDATE questions SET is_archived = 1" in query for query, _ in connection.db_cursor.executed))
         self.assertTrue(all("DELETE FROM sections" not in query for query, _ in connection.db_cursor.executed))
-        insert_content.assert_called_once_with(connection.db_cursor, 5, sections)
+        update_content.assert_called_once_with(connection.db_cursor, 5, sections)
+
+    def test_admin_can_delete_unreferenced_survey(self):
+        app = create_app({"SECRET_KEY": "test-secret", "TESTING": True})
+        connection = ResultsConnection()
+
+        @contextmanager
+        def fake_connection(*args):
+            yield connection
+
+        with patch(
+            "backend.core._current_user", return_value={"id": 2, "role": "admin"}
+        ), patch("backend.routes.admin.connection", fake_connection), patch(
+            "backend.routes.admin.fetch_one", side_effect=[{"id": 5}, None]
+        ), patch.object(connection, "start_transaction") as start_transaction:
+            client = app.test_client()
+            with client.session_transaction() as session:
+                session["user_id"] = 2
+            response = client.delete("/api/admin/surveys/5")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.get_json(), {"status": "deleted"})
+        self.assertTrue(any("DELETE FROM surveys" in query for query, _ in connection.db_cursor.executed))
+        self.assertTrue(any("INSERT INTO admin_audit_log" in query for query, _ in connection.db_cursor.executed))
+        start_transaction.assert_not_called()
+
+    def test_admin_cannot_delete_survey_used_by_cycle(self):
+        app = create_app({"SECRET_KEY": "test-secret", "TESTING": True})
+        connection = ResultsConnection()
+
+        @contextmanager
+        def fake_connection(*args):
+            yield connection
+
+        with patch(
+            "backend.core._current_user", return_value={"id": 2, "role": "admin"}
+        ), patch("backend.routes.admin.connection", fake_connection), patch(
+            "backend.routes.admin.fetch_one", side_effect=[{"id": 5}, {"id": 9}]
+        ):
+            client = app.test_client()
+            with client.session_transaction() as session:
+                session["user_id"] = 2
+            response = client.delete("/api/admin/surveys/5")
+
+        self.assertEqual(response.status_code, 409)
+        self.assertIn("evaluation cycle", response.get_json()["error"])
+        self.assertFalse(any("DELETE FROM surveys" in query for query, _ in connection.db_cursor.executed))
+
+    def test_survey_delete_reports_foreign_key_conflict_instead_of_server_error(self):
+        app = create_app({"SECRET_KEY": "test-secret", "TESTING": True})
+        connection = ResultsConnection()
+
+        @contextmanager
+        def fake_connection(*args):
+            yield connection
+
+        with patch(
+            "backend.core._current_user", return_value={"id": 2, "role": "admin"}
+        ), patch("backend.routes.admin.connection", fake_connection), patch(
+            "backend.routes.admin.fetch_one", side_effect=[{"id": 5}, None]
+        ), patch.object(
+            connection.db_cursor,
+            "execute",
+            side_effect=IntegrityError(msg="foreign key conflict", errno=1451),
+        ), patch.object(connection, "rollback") as rollback:
+            client = app.test_client()
+            with client.session_transaction() as session:
+                session["user_id"] = 2
+            response = client.delete("/api/admin/surveys/5")
+
+        self.assertEqual(response.status_code, 409)
+        self.assertIn("referenced by an evaluation cycle", response.get_json()["error"])
+        rollback.assert_called_once()
 
     def test_admin_standing_contains_only_the_office_mean(self):
         app = create_app({"SECRET_KEY": "test-secret", "TESTING": True})
@@ -663,7 +740,7 @@ class AdminResultsTests(unittest.TestCase):
         self.assertNotIn("private-response-id", response.get_data(as_text=True))
         self.assertNotIn("mmestorque@capsu.edu.ph", response.get_data(as_text=True))
         self.assertFalse(any("FROM comments" in call.args[1] for call in fetch_all.call_args_list))
-        load_survey.assert_called_once_with(connection.db_cursor, 4, cycle_id=3)
+        load_survey.assert_called_once_with(connection.db_cursor, 4)
 
 
 if __name__ == "__main__":

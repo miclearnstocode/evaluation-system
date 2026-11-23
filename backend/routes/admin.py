@@ -571,15 +571,52 @@ def update_survey(survey_id: int):
             "UPDATE surveys SET title = %s, description = %s WHERE id = %s",
             (title, str(payload.get("description", "")).strip() or None, survey_id),
         )
-        cursor.execute(
-            "UPDATE questions SET is_archived = 1 "
-            "WHERE survey_id = %s AND is_archived = 0",
-            (survey_id,),
-        )
-        _insert_survey_content(cursor, survey_id, sections)
+        _update_survey_content(cursor, survey_id, sections)
         conn.commit()
         cursor.close()
     return jsonify(status="updated")
+
+
+@bp.delete("/api/admin/surveys/<int:survey_id>")
+@require_role("admin")
+def delete_survey(survey_id: int):
+    actor = request_user()
+    with connection() as conn:
+        cursor = conn.cursor(dictionary=True)
+        try:
+            survey = fetch_one(
+                cursor,
+                "SELECT id FROM surveys WHERE id = %s FOR UPDATE",
+                (survey_id,),
+            )
+            if not survey:
+                raise ApiError("Survey not found.", 404)
+
+            cycle = fetch_one(
+                cursor,
+                "SELECT id FROM eval_cycles WHERE survey_id = %s LIMIT 1",
+                (survey_id,),
+            )
+            if cycle:
+                raise ApiError("A survey used by an evaluation cycle cannot be deleted.", 409)
+
+            cursor.execute("DELETE FROM surveys WHERE id = %s", (survey_id,))
+            _audit(cursor, actor, "delete", "survey", survey_id)
+            conn.commit()
+        except mysql.connector.IntegrityError as error:
+            conn.rollback()
+            if error.errno == 1451:
+                raise ApiError(
+                    "This survey is still referenced by an evaluation cycle and cannot be deleted.",
+                    409,
+                ) from None
+            raise
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            cursor.close()
+    return jsonify(status="deleted")
 
 
 @bp.post("/api/admin/surveys/<int:survey_id>/publish")
@@ -698,21 +735,6 @@ def create_cycle():
             (survey_id, name, opens_at, closes_at, current_app.config["MIN_RESULT_COUNT"], allow_same),
         )
         cycle_id = cursor.lastrowid
-        cursor.execute(
-            "INSERT INTO cycle_survey_snapshots "
-            "(cycle_id, survey_id, survey_title, survey_description) "
-            "SELECT %s, id, title, description FROM surveys WHERE id = %s",
-            (cycle_id, survey_id),
-        )
-        cursor.execute(
-            "INSERT INTO cycle_survey_questions "
-            "(cycle_id, question_id, section_id, section_title, section_order, question_order) "
-            "SELECT %s, q.id, s.id, s.title, s.sort_order, q.sort_order "
-            "FROM questions q JOIN sections s ON s.id = q.section_id "
-            "WHERE q.survey_id = %s AND q.is_archived = 0 "
-            "ORDER BY s.sort_order, s.id, q.sort_order, q.id",
-            (cycle_id, survey_id),
-        )
         _insert_all_cycle_targets(cursor, cycle_id)
         _insert_default_rules(cursor, cycle_id, allow_same)
         conn.commit()
@@ -1000,17 +1022,35 @@ def list_submissions():
             raise ApiError("Submissions are available only for open or closed cycles.", 409)
         if not _load_cycle_target(cursor, cycle_id, target_id):
             raise ApiError("Target not found in this cycle.", 404)
+            
+        # Fetch ALL active evaluators, LEFT JOIN their submission and score
         items = fetch_all(
             cursor,
-            "SELECT p.submission_token, p.submitted_at, u.email AS evaluator_email "
-            "FROM participation p JOIN users u ON u.id = p.user_id "
-            "WHERE p.cycle_id = %s AND p.target_id = %s ORDER BY p.submitted_at DESC",
+            "SELECT u.id AS user_id, u.first_name, u.last_name, u.email AS evaluator_email, "
+            "p.submission_token, p.submitted_at, ers.mean_score "
+            "FROM users u "
+            "LEFT JOIN participation p ON p.user_id = u.id AND p.cycle_id = %s AND p.target_id = %s "
+            "LEFT JOIN evaluator_response_scores ers ON ers.score_link_token = p.submission_token "
+            "WHERE u.role = 'evaluator' AND u.active = 1 "
+            "ORDER BY u.first_name, u.last_name",
             (cycle_id, target_id),
         )
+        
+        valid_scores = []
+        for item in items:
+            if item["mean_score"] is not None:
+                item["mean_score"] = float(item["mean_score"])
+                valid_scores.append(Decimal(str(item["mean_score"])))
+            if item["submitted_at"] is not None:
+                item["submitted_at"] = str(item["submitted_at"])
+
+        office_mean = _average_scores(valid_scores) if valid_scores else None
+
         _audit(cursor, actor, "view", "submission_list", f"{cycle_id}:{target_id}")
         conn.commit()
         cursor.close()
-    return jsonify(items=items)
+        
+    return jsonify(items=items, office_mean=office_mean)
 
 
 @bp.post("/api/admin/submissions/review")
@@ -1193,7 +1233,7 @@ def results():
             conn.commit()
             cursor.close()
             return jsonify(released=False, minimum=threshold, response_count=total)
-        survey = _load_survey(cursor, cycle["survey_id"], cycle_id=cycle_id)
+        survey = _load_survey(cursor, cycle["survey_id"])
         answer_rows = fetch_all(
             cursor,
             "SELECT response_id, question_id, answer_value, score AS question_score "

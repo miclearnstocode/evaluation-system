@@ -58,12 +58,12 @@ export default function LoginPage() {
     "w-full rounded-xl border border-slate-300 bg-white pl-11 pr-4 py-3 text-sm text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-teal-600 focus:ring-4 focus:ring-teal-600/10 disabled:bg-slate-100";
 
   return (
-    <main className="min-h-screen bg-gradient-to-br from-slate-50 via-white to-teal-50/40 text-slate-900">
+    <main className="min-h-screen bg-linear-to-br from-slate-50 via-white to-teal-50/40 text-slate-900">
       {/* Header */}
       <header className="sticky top-0 z-20 border-b border-slate-200/70 bg-white/80 backdrop-blur-md">
         <div className="mx-auto flex max-w-6xl items-center justify-between px-5 py-4">
           <Link href="/" className="flex items-center gap-3">
-            <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-[#1F3A5F] to-[#0F9D8A] text-sm font-bold text-white shadow-md shadow-teal-900/20">
+            <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-linear-to-br from-[#1F3A5F] to-[#0F9D8A] text-sm font-bold text-white shadow-md shadow-teal-900/20">
               AES
             </span>
             <span className="hidden font-semibold tracking-tight text-[#1F3A5F] sm:block">
@@ -87,7 +87,7 @@ export default function LoginPage() {
       <div className="mx-auto grid min-h-[calc(100vh-73px)] max-w-6xl items-center gap-10 px-5 py-10 md:grid-cols-2 lg:gap-16 lg:py-14">
         {/* Left: Brand / value proposition */}
         <div className="order-2 md:order-1">
-          <div className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-[#1F3A5F] via-[#1a4a5f] to-[#0F9D8A] p-8 text-white shadow-xl shadow-teal-900/20 sm:p-10">
+          <div className="relative overflow-hidden rounded-3xl bg-linear-to-br from-[#1F3A5F] via-[#1a4a5f] to-[#0F9D8A] p-8 text-white shadow-xl shadow-teal-900/20 sm:p-10">
             {/* Decorative blobs */}
             <div className="pointer-events-none absolute -right-16 -top-16 h-48 w-48 rounded-full bg-white/10 blur-2xl" aria-hidden="true" />
             <div className="pointer-events-none absolute -bottom-20 -left-16 h-56 w-56 rounded-full bg-teal-300/20 blur-3xl" aria-hidden="true" />
@@ -227,7 +227,7 @@ export default function LoginPage() {
               <button
                 type="submit"
                 disabled={loading}
-                className="group flex w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-[#0F9D8A] to-[#0C8575] px-4 py-3.5 text-sm font-semibold text-white shadow-lg shadow-teal-600/20 transition hover:shadow-teal-600/30 disabled:cursor-not-allowed disabled:opacity-60"
+                className="group flex w-full items-center justify-center gap-2 rounded-xl bg-linear-to-r from-[#0F9D8A] to-[#0C8575] px-4 py-3.5 text-sm font-semibold text-white shadow-lg shadow-teal-600/20 transition hover:shadow-teal-600/30 disabled:cursor-not-allowed disabled:opacity-60"
               >
                 {loading ? (
                   <>

@@ -38,6 +38,11 @@ export default function MyEvaluationsPage() {
 
   const selected = evaluations.find((evaluation) => evaluationKey(evaluation) === selectedEvaluationKey);
 
+  // Extract all successfully submitted evaluations
+  const submittedEvaluations = useMemo(() => {
+    return evaluations.filter((evaluation) => evaluation.submitted);
+  }, [evaluations]);
+
   function locationOf(evaluation: Evaluation) {
     return getTargetLocationLabel(evaluation.campus_name, Boolean(evaluation.is_central));
   }
@@ -59,17 +64,6 @@ export default function MyEvaluationsPage() {
       ),
     [evaluations, normalizedQuery],
   );
-
-  const stats = useMemo(() => {
-    const submitted = evaluations.filter((e) => e.submitted).length;
-    const openCycle = evaluations.some((e) => e.cycle_id !== null);
-    return {
-      total: evaluations.length,
-      submitted,
-      pending: evaluations.length - submitted,
-      openCycle,
-    };
-  }, [evaluations]);
 
   useEffect(() => {
     let active = true;
@@ -160,6 +154,11 @@ export default function MyEvaluationsPage() {
     router.push(`/evaluation/registrar?cycleId=${selected.cycle_id}&targetId=${selected.target_id}`);
   }
 
+  function viewSubmittedEvaluation(evaluation: Evaluation) {
+    if (!evaluation.submitted) return;
+    router.push(`/evaluation/summary?targetId=${evaluation.target_id}&cycleId=${evaluation.cycle_id}`);
+  }
+
   const listboxId = "target-listbox";
   const activeOptionId = open && filteredEvaluations[activeIndex] ? `target-option-${activeIndex}` : undefined;
   const inputValue = open ? query : selected ? labelOf(selected) : "";
@@ -187,24 +186,6 @@ export default function MyEvaluationsPage() {
               Search all targets and choose who to evaluate. An open evaluation cycle is required to submit.
             </p>
           </div>
-
-          {/* Stats */}
-          {!loading && !error && evaluations.length > 0 && (
-            <div className="flex flex-wrap gap-2">
-              <span className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3.5 py-2 text-xs font-medium text-slate-600 shadow-sm">
-                <span className="h-2 w-2 rounded-full bg-slate-400" aria-hidden="true" />
-                {stats.total} total
-              </span>
-              <span className="inline-flex items-center gap-2 rounded-xl border border-amber-200 bg-amber-50 px-3.5 py-2 text-xs font-medium text-amber-800 shadow-sm">
-                <span className="h-2 w-2 rounded-full bg-amber-500" aria-hidden="true" />
-                {stats.pending} pending
-              </span>
-              <span className="inline-flex items-center gap-2 rounded-xl border border-teal-200 bg-teal-50 px-3.5 py-2 text-xs font-medium text-teal-800 shadow-sm">
-                <span className="h-2 w-2 rounded-full bg-teal-500" aria-hidden="true" />
-                {stats.submitted} submitted
-              </span>
-            </div>
-          )}
         </div>
 
         {/* Info banner */}
@@ -235,6 +216,58 @@ export default function MyEvaluationsPage() {
           </div>
         )}
 
+        {/* --- NEW: Evaluated Offices Display --- */}
+        {!loading && submittedEvaluations.length > 0 && (
+          <section className="rounded-3xl border border-teal-100 bg-white p-6 shadow-sm sm:p-8">
+            <div className="flex items-center gap-3 border-b border-slate-100 pb-5">
+              <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-teal-50 text-teal-700 ring-1 ring-teal-600/20">
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-5 w-5" aria-hidden="true">
+                  <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" />
+                  <polyline points="22 4 12 14.01 9 11.01" />
+                </svg>
+              </span>
+              <div>
+                <h2 className="text-lg font-semibold text-[#1F3A5F]">Offices You&apos;ve Evaluated</h2>
+                <p className="mt-0.5 text-sm text-slate-500">
+                  You have successfully submitted evaluations for the following targets.
+                </p>
+              </div>
+            </div>
+
+            <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+              {submittedEvaluations.map((evaluation) => (
+                <div
+                  key={evaluationKey(evaluation)}
+                  className="flex flex-col justify-between rounded-2xl border border-slate-200 bg-slate-50/50 p-4 transition hover:border-teal-200 hover:bg-white hover:shadow-sm"
+                >
+                  <div>
+                    <p className="font-semibold text-slate-800 line-clamp-1" title={evaluation.target_name}>
+                      {evaluation.target_name}
+                    </p>
+                    <p className="mt-1 text-xs text-slate-500">
+                      {locationOf(evaluation)} • {evaluation.cycle_name ?? "Closed Cycle"}
+                    </p>
+                  </div>
+                  <div className="mt-4 flex items-center justify-between">
+                    <span className="inline-flex items-center gap-1.5 rounded-full bg-teal-100/50 px-2.5 py-1 text-[11px] font-semibold text-teal-700">
+                      <span className="h-1.5 w-1.5 rounded-full bg-teal-500" />
+                      Submitted
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => viewSubmittedEvaluation(evaluation)}
+                      className="text-xs font-semibold text-[#0F9D8A] transition hover:text-[#0C8575] hover:underline"
+                    >
+                      View Answers →
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </section>
+        )}
+
+        {/* Existing Search Section */}
         <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-lg shadow-slate-200/50 sm:p-8">
           <div className="flex items-start gap-3">
             <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-teal-50 text-teal-700 ring-1 ring-teal-600/20">
@@ -441,24 +474,39 @@ export default function MyEvaluationsPage() {
                     </span>
                   </div>
                 </div>
-                <button
-                  type="button"
-                  disabled={selected.submitted || selected.cycle_id === null}
-                  onClick={startSelectedEvaluation}
-                  className="group inline-flex shrink-0 items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-[#0F9D8A] to-[#0C8575] px-5 py-3 text-sm font-semibold text-white shadow-lg shadow-teal-600/20 transition hover:shadow-teal-600/30 disabled:cursor-not-allowed disabled:opacity-50 disabled:shadow-none"
-                >
-                  {selected.submitted
-                    ? "Already submitted"
-                    : selected.cycle_id === null
-                      ? "No open cycle"
-                      : "Start evaluation"}
-                  {!selected.submitted && selected.cycle_id !== null && (
-                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4 transition group-hover:translate-x-0.5" aria-hidden="true">
-                      <line x1="5" y1="12" x2="19" y2="12" />
-                      <polyline points="12 5 19 12 12 19" />
-                    </svg>
-                  )}
-                </button>
+
+                {selected.submitted ? (
+                  <div className="flex flex-col items-start gap-2 sm:items-end">
+                    <span className="inline-flex items-center gap-1.5 rounded-lg bg-teal-50 px-3 py-1.5 text-sm font-semibold text-teal-800 ring-1 ring-teal-600/20">
+                      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4" aria-hidden="true">
+                        <polyline points="20 6 9 17 4 12" />
+                      </svg>
+                      Already submitted
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => viewSubmittedEvaluation(selected)}
+                      className="text-sm font-semibold text-teal-700 hover:underline"
+                    >
+                      View my evaluation
+                    </button>
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    disabled={selected.cycle_id === null}
+                    onClick={startSelectedEvaluation}
+                    className="group inline-flex shrink-0 items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-[#0F9D8A] to-[#0C8575] px-5 py-3 text-sm font-semibold text-white shadow-lg shadow-teal-600/20 transition hover:shadow-teal-600/30 disabled:cursor-not-allowed disabled:opacity-50 disabled:shadow-none"
+                  >
+                    {selected.cycle_id === null ? "No open cycle" : "Start evaluation"}
+                    {selected.cycle_id !== null && (
+                      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4 transition group-hover:translate-x-0.5" aria-hidden="true">
+                        <line x1="5" y1="12" x2="19" y2="12" />
+                        <polyline points="12 5 19 12 12 19" />
+                      </svg>
+                    )}
+                  </button>
+                )}
               </div>
             </div>
           )}

@@ -177,10 +177,12 @@ def validate_survey_payload(payload: Any) -> list[dict[str, Any]]:
                 clean_options = []
                 option_labels = set()
                 for option in options:
+                    option_id = None
                     if isinstance(option, str):
                         label, points = option, 1
                     elif isinstance(option, dict) and isinstance(option.get("label"), str):
                         label, points = option["label"], option.get("points", 1)
+                        option_id = option.get("id")
                     else:
                         raise ApiError("Choice questions need distinct, non-empty options.")
                     label = label.strip()
@@ -189,6 +191,7 @@ def validate_survey_payload(payload: Any) -> list[dict[str, Any]]:
                     option_labels.add(label)
                     clean_options.append(
                         {
+                            "id": option_id if isinstance(option_id, int) and option_id > 0 else None,
                             "label": label,
                             "points": _score_config_value(points, "Choice points"),
                         }
@@ -204,6 +207,7 @@ def validate_survey_payload(payload: Any) -> list[dict[str, Any]]:
                 raise ApiError("Scale questions need a valid minimum and maximum.")
             clean_questions.append(
                 {
+                    "id": item.get("id") if isinstance(item.get("id"), int) and item["id"] > 0 else None,
                     "text": text,
                     "type": question_type,
                     "required": bool(item.get("required", False)),
@@ -215,7 +219,11 @@ def validate_survey_payload(payload: Any) -> list[dict[str, Any]]:
                     "max_label": item.get("max_label"),
                 }
             )
-        normalized.append({"title": title, "questions": clean_questions})
+        normalized.append({
+            "id": section.get("id") if isinstance(section.get("id"), int) and section["id"] > 0 else None,
+            "title": title,
+            "questions": clean_questions,
+        })
     if not any(section["questions"] for section in normalized):
         raise ApiError("A survey must contain at least one question.")
     return normalized
@@ -318,62 +326,30 @@ def _load_survey(
     cursor: Any,
     survey_id: int,
     include_scoring: bool = False,
-    cycle_id: int | None = None,
 ) -> dict[str, Any]:
     survey = fetch_one(cursor, "SELECT id, title, description, status FROM surveys WHERE id = %s", (survey_id,))
     if not survey:
         raise ApiError("Survey not found.", 404)
-    if cycle_id is None:
-        sections = fetch_all(
-            cursor,
-            "SELECT s.id, s.title, s.sort_order FROM sections s "
-            "WHERE s.survey_id = %s AND EXISTS ("
-            "SELECT 1 FROM questions q WHERE q.section_id = s.id AND q.is_archived = 0"
-            ") ORDER BY s.sort_order, s.id",
-            (survey_id,),
-        )
-    else:
-        snapshot = fetch_one(
-            cursor,
-            "SELECT survey_title AS title, survey_description AS description "
-            "FROM cycle_survey_snapshots WHERE cycle_id = %s AND survey_id = %s",
-            (cycle_id, survey_id),
-        )
-        if not snapshot:
-            raise ApiError("The evaluation cycle's survey snapshot is missing.", 409)
-        survey["title"] = snapshot["title"]
-        survey["description"] = snapshot["description"]
-        sections = fetch_all(
-            cursor,
-            "SELECT DISTINCT section_id AS id, section_title AS title, section_order AS sort_order "
-            "FROM cycle_survey_questions WHERE cycle_id = %s "
-            "ORDER BY section_order, section_id",
-            (cycle_id,),
-        )
+    sections = fetch_all(
+        cursor,
+        "SELECT s.id, s.title, s.sort_order FROM sections s "
+        "WHERE s.survey_id = %s AND EXISTS ("
+        "SELECT 1 FROM questions q WHERE q.section_id = s.id AND q.is_archived = 0"
+        ") ORDER BY s.sort_order, s.id",
+        (survey_id,),
+    )
     for section in sections:
         score_column = ", weight AS score_weight" if include_scoring else ""
-        if cycle_id is None:
-            questions = fetch_all(
-                cursor,
-                "SELECT id, question_type AS type, prompt AS question_text, is_required AS required, "
-                "sort_order, scale_min, scale_max, min_label, max_label"
-                f"{score_column} "
-                "FROM questions WHERE section_id = %s AND is_archived = 0 ORDER BY sort_order, id",
-                (section["id"],),
-            )
-        else:
-            questions = fetch_all(
-                cursor,
-                "SELECT q.id, q.question_type AS type, q.prompt AS question_text, "
-                "q.is_required AS required, csq.question_order AS sort_order, "
-                "q.scale_min, q.scale_max, q.min_label, q.max_label"
-                f"{score_column} "
-                "FROM cycle_survey_questions csq JOIN questions q ON q.id = csq.question_id "
-                "WHERE csq.cycle_id = %s AND csq.section_id = %s "
-                "ORDER BY csq.question_order, q.id",
-                (cycle_id, section["id"]),
-            )
+        questions = fetch_all(
+            cursor,
+            "SELECT id, question_type AS type, prompt AS question_text, is_required AS required, "
+            "sort_order, scale_min, scale_max, min_label, max_label"
+            f"{score_column} "
+            "FROM questions WHERE section_id = %s AND is_archived = 0 ORDER BY sort_order, id",
+            (section["id"],),
+        )
         for question in questions:
+            question["required"] = bool(question["required"])
             points_column = ", points" if include_scoring else ""
             question["options"] = fetch_all(
                 cursor,
@@ -423,6 +399,138 @@ def _insert_survey_content(cursor: Any, survey_id: int, sections: list[dict[str,
                 )
 
 
+def _update_survey_content(cursor: Any, survey_id: int, sections: list[dict[str, Any]]) -> None:
+    kept_question_ids: set[int] = set()
+
+    for section_order, section in enumerate(sections):
+        section_id = section.get("id")
+        if section_id:
+            existing_section = fetch_one(
+                cursor,
+                "SELECT id FROM sections WHERE id = %s AND survey_id = %s",
+                (section_id, survey_id),
+            )
+        else:
+            existing_section = None
+
+        if existing_section:
+            section_id = existing_section["id"]
+            cursor.execute(
+                "UPDATE sections SET title = %s, sort_order = %s WHERE id = %s",
+                (section["title"], section_order, section_id),
+            )
+        else:
+            cursor.execute(
+                "INSERT INTO sections (survey_id, title, sort_order) VALUES (%s, %s, %s)",
+                (survey_id, section["title"], section_order),
+            )
+            section_id = cursor.lastrowid
+
+        for question_order, question in enumerate(section["questions"]):
+            question_id = question.get("id")
+            if question_id:
+                existing_question = fetch_one(
+                    cursor,
+                    "SELECT id FROM questions WHERE id = %s AND survey_id = %s",
+                    (question_id, survey_id),
+                )
+            else:
+                existing_question = None
+
+            if existing_question:
+                question_id = existing_question["id"]
+                cursor.execute(
+                    "UPDATE questions SET section_id = %s, question_type = %s, prompt = %s, "
+                    "is_required = %s, sort_order = %s, scale_min = %s, scale_max = %s, "
+                    "weight = %s, min_label = %s, max_label = %s, is_archived = 0 "
+                    "WHERE id = %s",
+                    (
+                        section_id,
+                        question["type"],
+                        question["text"],
+                        question["required"],
+                        question_order,
+                        question["scale_min"],
+                        question["scale_max"],
+                        question["score_weight"],
+                        question["min_label"],
+                        question["max_label"],
+                        question_id,
+                    ),
+                )
+            else:
+                cursor.execute(
+                    "INSERT INTO questions "
+                    "(survey_id, section_id, question_type, prompt, is_required, sort_order, scale_min, scale_max, "
+                    "weight, min_label, max_label) "
+                    "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
+                    (
+                        survey_id,
+                        section_id,
+                        question["type"],
+                        question["text"],
+                        question["required"],
+                        question_order,
+                        question["scale_min"],
+                        question["scale_max"],
+                        question["score_weight"],
+                        question["min_label"],
+                        question["max_label"],
+                    ),
+                )
+                question_id = cursor.lastrowid
+
+            kept_question_ids.add(question_id)
+
+            existing_options = fetch_all(
+                cursor,
+                "SELECT id FROM question_options WHERE question_id = %s",
+                (question_id,),
+            )
+            existing_option_ids = {option["id"] for option in existing_options}
+            kept_option_ids: set[int] = set()
+
+            for option_order, option in enumerate(question["options"]):
+                option_id = option.get("id")
+                if option_id in existing_option_ids:
+                    cursor.execute(
+                        "UPDATE question_options SET option_key = %s, option_text = %s, "
+                        "sort_order = %s, points = %s WHERE id = %s",
+                        (
+                            str(option_order + 1),
+                            option["label"],
+                            option_order,
+                            option["points"],
+                            option_id,
+                        ),
+                    )
+                    kept_option_ids.add(option_id)
+                else:
+                    cursor.execute(
+                        "INSERT INTO question_options "
+                        "(question_id, option_key, option_text, sort_order, points) "
+                        "VALUES (%s, %s, %s, %s, %s)",
+                        (
+                            question_id,
+                            str(option_order + 1),
+                            option["label"],
+                            option_order,
+                            option["points"],
+                        ),
+                    )
+
+            removed_option_ids = existing_option_ids - kept_option_ids
+            for option_id in removed_option_ids:
+                cursor.execute("DELETE FROM question_options WHERE id = %s", (option_id,))
+
+    cursor.execute(
+        "UPDATE questions SET is_archived = 1 "
+        "WHERE survey_id = %s AND is_archived = 0"
+        + ("" if not kept_question_ids else " AND id NOT IN (" + ",".join(["%s"] * len(kept_question_ids)) + ")"),
+        (survey_id, *kept_question_ids) if kept_question_ids else (survey_id,),
+    )
+
+
 def _audit(cursor: Any, user: dict[str, Any], action: str, entity: str, entity_id: Any = None) -> None:
     cursor.execute(
         "INSERT INTO admin_audit_log (admin_id, action, entity, entity_id, created_at) "
@@ -464,4 +572,4 @@ def _date_value(value: Any, field: str) -> datetime:
         parsed = parsed.astimezone(timezone.utc).replace(tzinfo=None)
     return parsed
 
-__all__ = ['logging', 'os', 're', 'uuid', 'contextmanager', 'datetime', 'timedelta', 'timezone', 'wraps', 'Path', 'Any', 'Callable', 'Iterator', 'mysql', 'load_dotenv', 'Flask', 'current_app', 'jsonify', 'request', 'session', 'HTTPException', 'check_password_hash', 'generate_password_hash', 'QUESTION_TYPES', 'IDENTIFYING_QUESTION', 'CAPSU_EMAIL', 'ApiError', 'SuppressSubmissionAccessLog', '_utcnow_naive', '_is_int', 'validate_questions', 'rule_matches', 'is_eligible', 'validate_survey_payload', '_connect', 'connection', 'fetch_one', 'fetch_all', '_current_user', 'require_role', 'request_user', '_json_body', '_positive_id', '_bool_value', '_cycle_is_open', '_cycle_is_closed', '_load_rules', '_cycle_user_eligible', '_registration_policy_allows', '_load_cycle_target', '_load_survey', '_insert_survey_content', '_audit', '_insert_default_rules', '_insert_all_cycle_targets', '_date_value']
+__all__ = ['logging', 'os', 're', 'uuid', 'contextmanager', 'datetime', 'timedelta', 'timezone', 'wraps', 'Path', 'Any', 'Callable', 'Iterator', 'mysql', 'load_dotenv', 'Flask', 'current_app', 'jsonify', 'request', 'session', 'HTTPException', 'check_password_hash', 'generate_password_hash', 'QUESTION_TYPES', 'IDENTIFYING_QUESTION', 'CAPSU_EMAIL', 'ApiError', 'SuppressSubmissionAccessLog', '_utcnow_naive', '_is_int', 'validate_questions', 'rule_matches', 'is_eligible', 'validate_survey_payload', '_connect', 'connection', 'fetch_one', 'fetch_all', '_current_user', 'require_role', 'request_user', '_json_body', '_positive_id', '_bool_value', '_cycle_is_open', '_cycle_is_closed', '_load_rules', '_cycle_user_eligible', '_registration_policy_allows', '_load_cycle_target', '_load_survey', '_insert_survey_content', '_update_survey_content', '_audit', '_insert_default_rules', '_insert_all_cycle_targets', '_date_value']

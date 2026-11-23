@@ -229,34 +229,6 @@ CREATE TABLE eval_cycles (
     FOREIGN KEY (survey_id) REFERENCES surveys(id) ON DELETE RESTRICT
 );
 
-CREATE TABLE cycle_survey_snapshots (
-  cycle_id INT PRIMARY KEY,
-  survey_id INT NOT NULL,
-  survey_title VARCHAR(255) NOT NULL,
-  survey_description TEXT NULL,
-  CONSTRAINT fk_cycle_survey_snapshots_cycle
-    FOREIGN KEY (cycle_id) REFERENCES eval_cycles(id) ON DELETE CASCADE,
-  CONSTRAINT fk_cycle_survey_snapshots_survey
-    FOREIGN KEY (survey_id) REFERENCES surveys(id) ON DELETE RESTRICT
-);
-
-CREATE TABLE cycle_survey_questions (
-  cycle_id INT NOT NULL,
-  question_id INT NOT NULL,
-  section_id INT NOT NULL,
-  section_title VARCHAR(255) NOT NULL,
-  section_order INT NOT NULL,
-  question_order INT NOT NULL,
-  PRIMARY KEY (cycle_id, question_id),
-  KEY ix_cycle_survey_questions_order (cycle_id, section_order, question_order),
-  CONSTRAINT fk_cycle_survey_questions_cycle
-    FOREIGN KEY (cycle_id) REFERENCES eval_cycles(id) ON DELETE CASCADE,
-  CONSTRAINT fk_cycle_survey_questions_question
-    FOREIGN KEY (question_id) REFERENCES questions(id) ON DELETE RESTRICT,
-  CONSTRAINT fk_cycle_survey_questions_section
-    FOREIGN KEY (section_id) REFERENCES sections(id) ON DELETE RESTRICT
-);
-
 CREATE TABLE cycle_targets (
   cycle_id INT NOT NULL,
   target_id INT NOT NULL,

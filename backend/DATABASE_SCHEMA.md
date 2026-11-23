@@ -6,8 +6,8 @@ reference describes the relationships and the backend's use of the tables.
 The DDL creates the `evaluation_system` database; it is not an in-place
 migration for an existing database.
 For an existing database, apply
-[20261123_cycle_survey_snapshots.sql](./migrations/20261123_cycle_survey_snapshots.sql)
-before deploying the snapshot-aware backend.
+[20261123_remove_cycle_survey_snapshots.sql](./migrations/20261123_remove_cycle_survey_snapshots.sql)
+to remove the obsolete cycle snapshot tables.
 
 ## Relationship diagram
 
@@ -32,10 +32,6 @@ erDiagram
     sections ||--o{ questions : section_id
     questions ||--o{ question_options : question_id
     surveys ||--o{ eval_cycles : survey_id
-    eval_cycles ||--|| cycle_survey_snapshots : cycle_id
-    eval_cycles ||--o{ cycle_survey_questions : cycle_id
-    questions ||--o{ cycle_survey_questions : question_id
-    sections ||--o{ cycle_survey_questions : section_id
     eval_cycles ||--o{ cycle_targets : cycle_id
     targets ||--o{ cycle_targets : target_id
     eval_cycles ||--o{ eligibility_rules : cycle_id
@@ -86,12 +82,10 @@ the DDL enforces the type/reference match and each reference has a foreign key.
 | Table | Purpose and connections |
 |---|---|
 | `surveys` | Survey title, description, version, and draft/published/archived state. Owns sections and questions and is selected by cycles. |
-| `sections` | Ordered groupings of questions within a survey. Prior section rows are retained when a survey is edited so cycle snapshots can refer to their original content. |
+| `sections` | Ordered groupings of questions within a survey. Evaluator forms and results read the survey's current active sections and questions. |
 | `questions` | Survey prompts, type, required/scale settings, order, scoring weight, and archive state. Belongs to a survey and section. Editing archives prior questions instead of deleting answer-linked rows. |
 | `question_options` | Ordered choices and their scoring points for choice questions. `option_key` is unique within a question. |
 | `eval_cycles` | Survey schedule, open/close times, status, response threshold, same-campus setting, and target category (or all categories). |
-| `cycle_survey_snapshots` | Survey title and description captured when a cycle is created. |
-| `cycle_survey_questions` | Ordered question and section-title snapshot for a cycle. Evaluator forms, scoring, and result views use this fixed set even after the survey is edited. |
 | `cycle_targets` | Join table selecting targets for cycles. Its composite primary key prevents duplicate assignments. |
 | `eligibility_rules` | Retained cycle rule configuration; rules do not filter which targets an evaluator may submit to. |
 

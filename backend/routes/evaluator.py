@@ -58,7 +58,8 @@ def evaluator_targets():
             for target in targets:
                 previous = fetch_one(
                     cursor,
-                    "SELECT id FROM participation WHERE user_id = %s AND cycle_id = %s AND target_id = %s",
+                    "SELECT 1 FROM participation p "
+                    "WHERE p.user_id = %s AND p.cycle_id = %s AND p.target_id = %s",
                     (user["id"], cycle["cycle_id"], target["target_id"]),
                 )
                 items.append(
@@ -91,6 +92,134 @@ def evaluator_targets():
     return jsonify(items=items)
 
 
+@bp.get("/api/evaluator/submissions")
+@require_role("evaluator")
+def evaluator_submission():
+    cycle_id = _positive_id(request.args.get("cycle_id"), "cycle_id")
+    target_id = _positive_id(request.args.get("target_id"), "target_id")
+    user = request_user()
+    with connection("submit") as conn:
+        cursor = conn.cursor(dictionary=True)
+        submission = fetch_one(
+            cursor,
+            "SELECT p.submission_token, c.title AS cycle_name, s.title AS survey_title "
+            "FROM participation p "
+            "JOIN eval_cycles c ON c.id = p.cycle_id "
+            "JOIN surveys s ON s.id = c.survey_id "
+            "WHERE p.user_id = %s AND p.cycle_id = %s AND p.target_id = %s",
+            (user["id"], cycle_id, target_id),
+        )
+        if not submission:
+            raise ApiError("Evaluation not found.", 404)
+        score_record = fetch_one(
+            cursor,
+            "SELECT total_score, mean_score, section_count, section_scores "
+            "FROM evaluator_response_scores "
+            "WHERE score_link_token = %s AND cycle_id = %s AND target_id = %s",
+            (submission["submission_token"], cycle_id, target_id),
+        )
+        target = _load_evaluator_target(cursor, target_id)
+        if not target:
+            raise ApiError("Evaluation not found.", 404)
+        scores = None
+        if score_record:
+            section_scores = score_record["section_scores"]
+            if isinstance(section_scores, (str, bytes, bytearray)):
+                section_scores = json.loads(section_scores)
+            scores = {
+                "total_score": float(score_record["total_score"]),
+                "mean_score": float(score_record["mean_score"]),
+                "section_count": score_record["section_count"],
+                "section_scores": [
+                    {
+                        "section_id": section["section_id"],
+                        "title": section["title"],
+                        "score": float(section["score"]),
+                    }
+                    for section in section_scores
+                ],
+            }
+        answers = fetch_all(
+            cursor,
+            "SELECT ea.question_id, ea.answer_value, q.prompt AS question, "
+            "q.question_type AS question_type, q.section_id, sec.title AS section_title, "
+            "sec.sort_order AS section_sort_order, q.sort_order AS question_sort_order "
+            "FROM evaluator_answers ea "
+            "JOIN questions q ON q.id = ea.question_id "
+            "JOIN sections sec ON sec.id = q.section_id "
+            "WHERE ea.submission_token = %s "
+            "ORDER BY sec.sort_order, sec.id, q.sort_order, q.id",
+            (submission["submission_token"],),
+        )
+        choice_question_ids = sorted(
+            {
+                answer["question_id"]
+                for answer in answers
+                if answer["question_type"] in {"single_choice", "multi_choice"}
+            }
+        )
+        option_labels = {}
+        if choice_question_ids:
+            placeholders = ", ".join(["%s"] * len(choice_question_ids))
+            options = fetch_all(
+                cursor,
+                "SELECT id, question_id, option_text FROM question_options "
+                f"WHERE question_id IN ({placeholders})",
+                tuple(choice_question_ids),
+            )
+            option_labels = {
+                (option["question_id"], option["id"]): option["option_text"]
+                for option in options
+            }
+
+        sections = []
+        sections_by_id = {}
+        for answer in answers:
+            value = answer["answer_value"]
+            if isinstance(value, (str, bytes, bytearray)):
+                value = json.loads(value)
+            question_type = answer["question_type"]
+            question_id = answer["question_id"]
+            if question_type == "single_choice":
+                value = option_labels.get((question_id, value), str(value))
+            elif question_type == "multi_choice":
+                value = [
+                    option_labels.get((question_id, option_id), str(option_id))
+                    for option_id in value
+                ]
+            elif question_type == "yes_no":
+                value = "Yes" if value else "No"
+
+            section = sections_by_id.get(answer["section_id"])
+            if section is None:
+                section = {
+                    "id": answer["section_id"],
+                    "title": answer["section_title"],
+                    "answers": [],
+                }
+                sections_by_id[answer["section_id"]] = section
+                sections.append(section)
+            section["answers"].append(
+                {
+                    "question_id": question_id,
+                    "question": answer["question"],
+                    "answer": value,
+                }
+            )
+        cursor.close()
+    return jsonify(
+        cycle_id=cycle_id,
+        cycle_name=submission["cycle_name"],
+        target_id=target_id,
+        target_name=target["target_name"],
+        campus_name=target["campus_name"],
+        is_central=target["is_central"],
+        survey_title=submission["survey_title"],
+        scores=scores,
+        sections=sections,
+    )
+
+
 @bp.get("/api/evaluator/targets/<int:target_id>/form")
 @require_role("evaluator")
 def evaluator_form(target_id: int):
@@ -116,7 +245,7 @@ def evaluator_form(target_id: int):
         )
         if previous:
             raise ApiError("You have already submitted this evaluation.", 409)
-        survey = _load_survey(cursor, cycle["survey_id"], cycle_id=cycle_id)
+        survey = _load_survey(cursor, cycle["survey_id"])
         if survey["status"] != "published":
             raise ApiError("This survey is not available.", 409)
         cursor.close()
@@ -165,7 +294,6 @@ def submit_evaluation():
                 cursor,
                 cycle["survey_id"],
                 include_scoring=True,
-                cycle_id=cycle_id,
             )
             if survey["status"] != "published":
                 raise ApiError("This survey is not available.", 409)
@@ -277,4 +405,20 @@ def submit_evaluation():
             raise
         finally:
             cursor.close()
-    return jsonify(status="submitted"), 201
+    return jsonify(
+        status="submitted",
+        total_score=float(score_data["total_score"]),
+        mean_score=float(score_data["mean_score"]),
+        section_scores=[
+            {
+                "section_id": section["section_id"],
+                "title": section["title"],
+                "score": float(section["score"]),
+            }
+            for section in score_data["section_scores"]
+        ],
+        question_scores={
+            str(question_id): float(score) if score is not None else None
+            for question_id, score in score_data["question_scores"].items()
+        },
+    ), 201

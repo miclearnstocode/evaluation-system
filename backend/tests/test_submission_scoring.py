@@ -119,7 +119,19 @@ class EvaluationScoringPersistenceTests(unittest.TestCase):
             )
 
         self.assertEqual(response.status_code, 201)
-        self.assertEqual(response.get_json(), {"status": "submitted"})
+        response_body = response.get_json()
+        self.assertEqual(response_body["status"], "submitted")
+        self.assertEqual(response_body["total_score"], 13.5)
+        self.assertEqual(response_body["mean_score"], 6.75)
+        self.assertEqual(
+            [section["score"] for section in response_body["section_scores"]],
+            [10.5, 3.0],
+        )
+        self.assertEqual(response_body["question_scores"], {
+            "1": 8.0,
+            "2": 2.5,
+            "3": 3.0,
+        })
         self.assertTrue(connection.committed)
 
         queries = connection.db_cursor.executed
@@ -265,7 +277,6 @@ class EvaluationTargetAccessTests(unittest.TestCase):
         load_survey.assert_called_once_with(
             self.connection.db_cursor,
             4,
-            cycle_id=3,
         )
 
     def test_submit_rejects_a_second_evaluation_for_the_same_target_and_cycle(self):
@@ -295,6 +306,167 @@ class EvaluationTargetAccessTests(unittest.TestCase):
         self.assertEqual(response.status_code, 409)
         self.assertIn("already submitted", response.get_json()["error"])
         self.assertFalse(self.connection.committed)
+
+
+class EvaluationSubmissionReviewTests(unittest.TestCase):
+    def setUp(self):
+        self.app = create_app({"SECRET_KEY": "test-secret", "TESTING": True})
+        self.connection = SubmissionConnection()
+        self.user = {"id": 7, "role": "evaluator"}
+
+    @contextmanager
+    def fake_connection(self, *args):
+        yield self.connection
+
+    def authenticated_client(self):
+        client = self.app.test_client()
+        with client.session_transaction() as session:
+            session["user_id"] = self.user["id"]
+        return client
+
+    def test_evaluator_can_view_their_own_submission_answers(self):
+        answers = [
+            {
+                "question_id": 1,
+                "answer_value": b"4",
+                "question": "Rate the service",
+                "question_type": "scale",
+                "section_id": 10,
+                "section_title": "Service",
+            },
+            {
+                "question_id": 2,
+                "answer_value": b"21",
+                "question": "Choose one",
+                "question_type": "single_choice",
+                "section_id": 10,
+                "section_title": "Service",
+            },
+            {
+                "question_id": 3,
+                "answer_value": b"[31, 32]",
+                "question": "Choose all that apply",
+                "question_type": "multi_choice",
+                "section_id": 10,
+                "section_title": "Service",
+            },
+            {
+                "question_id": 4,
+                "answer_value": b"false",
+                "question": "Would you recommend this office?",
+                "question_type": "yes_no",
+                "section_id": 20,
+                "section_title": "Support",
+            },
+        ]
+        options = [
+            {"id": 21, "question_id": 2, "option_text": "Helpful"},
+            {"id": 31, "question_id": 3, "option_text": "Timely"},
+            {"id": 32, "question_id": 3, "option_text": "Clear"},
+        ]
+        with patch("backend.core._current_user", return_value=self.user), patch(
+            "backend.routes.evaluator.connection", self.fake_connection
+        ), patch(
+            "backend.routes.evaluator.fetch_one",
+            side_effect=[
+                {
+                    "submission_token": "own-submission",
+                    "cycle_name": "Current cycle",
+                    "survey_title": "Service survey",
+                },
+                {
+                    "total_score": Decimal("12.50"),
+                    "mean_score": Decimal("6.25"),
+                    "section_count": 2,
+                    "section_scores": json.dumps(
+                        [
+                            {"section_id": 10, "title": "Service", "score": 8.5},
+                            {"section_id": 20, "title": "Support", "score": 4},
+                        ]
+                    ).encode(),
+                },
+            ],
+        ) as fetch_one, patch(
+            "backend.routes.evaluator._load_evaluator_target",
+            return_value={
+                "target_name": "Office Alpha",
+                "campus_name": "Remote Campus",
+                "is_central": 0,
+            },
+        ), patch(
+            "backend.routes.evaluator.fetch_all", side_effect=[answers, options]
+        ):
+            response = self.authenticated_client().get(
+                "/api/evaluator/submissions?cycle_id=3&target_id=9"
+            )
+
+        self.assertEqual(response.status_code, 200)
+        data = response.get_json()
+        self.assertEqual(data["target_name"], "Office Alpha")
+        self.assertEqual(
+            data["scores"],
+            {
+                "total_score": 12.5,
+                "mean_score": 6.25,
+                "section_count": 2,
+                "section_scores": [
+                    {"section_id": 10, "title": "Service", "score": 8.5},
+                    {"section_id": 20, "title": "Support", "score": 4.0},
+                ],
+            },
+        )
+        self.assertEqual(
+            data["sections"],
+            [
+                {
+                    "id": 10,
+                    "title": "Service",
+                    "answers": [
+                        {"question_id": 1, "question": "Rate the service", "answer": 4},
+                        {"question_id": 2, "question": "Choose one", "answer": "Helpful"},
+                        {
+                            "question_id": 3,
+                            "question": "Choose all that apply",
+                            "answer": ["Timely", "Clear"],
+                        },
+                    ],
+                },
+                {
+                    "id": 20,
+                    "title": "Support",
+                    "answers": [
+                        {
+                            "question_id": 4,
+                            "question": "Would you recommend this office?",
+                            "answer": "No",
+                        }
+                    ],
+                },
+            ],
+        )
+        self.assertEqual(
+            fetch_one.call_args_list[0].args[2],
+            (self.user["id"], 3, 9),
+        )
+        self.assertIn("evaluator_response_scores", fetch_one.call_args_list[1].args[1])
+        self.assertEqual(
+            fetch_one.call_args_list[1].args[2],
+            ("own-submission", 3, 9),
+        )
+
+    def test_evaluator_cannot_view_another_users_submission(self):
+        with patch("backend.core._current_user", return_value=self.user), patch(
+            "backend.routes.evaluator.connection", self.fake_connection
+        ), patch("backend.routes.evaluator.fetch_one", return_value=None), patch(
+            "backend.routes.evaluator.fetch_all"
+        ) as fetch_all:
+            response = self.authenticated_client().get(
+                "/api/evaluator/submissions?cycle_id=3&target_id=9"
+            )
+
+        self.assertEqual(response.status_code, 404)
+        self.assertEqual(response.get_json()["error"], "Evaluation not found.")
+        fetch_all.assert_not_called()
 
 
 if __name__ == "__main__":

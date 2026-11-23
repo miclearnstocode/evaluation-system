@@ -168,12 +168,12 @@ export default function RegisterPage() {
   }
 
   return (
-    <main className="min-h-screen bg-gradient-to-br from-slate-50 via-white to-teal-50/40 text-slate-900">
+    <main className="min-h-screen bg-linear-to-br from-slate-50 via-white to-teal-50/40 text-slate-900">
       {/* Header */}
       <header className="sticky top-0 z-20 border-b border-slate-200/70 bg-white/80 backdrop-blur-md">
         <div className="mx-auto flex max-w-6xl items-center justify-between px-5 py-4">
           <Link href="/" className="flex items-center gap-3">
-            <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-[#1F3A5F] to-[#0F9D8A] text-sm font-bold text-white shadow-md shadow-teal-900/20">
+            <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-linear-to-br from-[#1F3A5F] to-[#0F9D8A] text-sm font-bold text-white shadow-md shadow-teal-900/20">
               AES
             </span>
             <span className="hidden font-semibold tracking-tight text-[#1F3A5F] sm:block">
@@ -197,7 +197,7 @@ export default function RegisterPage() {
         <div className="grid gap-8 lg:grid-cols-[1fr_1.6fr] lg:items-start">
           {/* Left: Intro panel */}
           <aside className="lg:sticky lg:top-24">
-            <div className="overflow-hidden rounded-3xl bg-gradient-to-br from-[#1F3A5F] via-[#1a4a5f] to-[#0F9D8A] p-7 text-white shadow-xl shadow-teal-900/20 sm:p-8">
+            <div className="overflow-hidden rounded-3xl bg-linear-to-br from-[#1F3A5F] via-[#1a4a5f] to-[#0F9D8A] p-7 text-white shadow-xl shadow-teal-900/20 sm:p-8">
               <p className="text-xs font-semibold uppercase tracking-[0.18em] text-teal-200">
                 Evaluator registration
               </p>
@@ -578,7 +578,7 @@ export default function RegisterPage() {
                       <button
                         type="submit"
                         disabled={loading || loadingOptions || !options.locations.length}
-                        className="group flex w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-[#0F9D8A] to-[#0C8575] px-5 py-3.5 text-sm font-semibold text-white shadow-lg shadow-teal-600/20 transition hover:shadow-teal-600/30 disabled:cursor-not-allowed disabled:opacity-60"
+                        className="group flex w-full items-center justify-center gap-2 rounded-xl bg-linear-to-r from-[#0F9D8A] to-[#0C8575] px-5 py-3.5 text-sm font-semibold text-white shadow-lg shadow-teal-600/20 transition hover:shadow-teal-600/30 disabled:cursor-not-allowed disabled:opacity-60"
                       >
                         {loading ? (
                           <>

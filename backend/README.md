@@ -11,7 +11,7 @@ For a visual relationship diagram and explanations of every table, view, and sto
 
 `database-schema.sql` is a fresh-install schema, not an in-place migration. Do not import it over a database containing existing tables or data. Back up the existing database and plan a data migration before switching an existing installation.
 
-For an existing installation, apply `migrations/20261123_cycle_survey_snapshots.sql` once before deploying the updated backend. It records the current question set for existing cycles so later survey edits do not change their forms or historical results.
+For an existing installation, apply `migrations/20261123_remove_cycle_survey_snapshots.sql` to remove the obsolete cycle snapshot tables. Evaluator forms and results read the current active survey sections and questions.
 
 ## Install and run
 
@@ -64,7 +64,7 @@ Administrators can view office-level mean scores only. Super administrators can 
 - `GET /api/admin/standing` (aggregate mean for admins; section and evaluator means for super admins)
 - Super-admin accounts are results-only: `/super_admin/standing` and `/super_admin/results`.
 - `GET /api/admin/results/options` and `/api/admin/results` provide the cycle and target selections and detailed results for super admins.
-- `GET/POST/PUT /api/admin/surveys` plus publish; survey edits update the same survey row and preserve prior cycle snapshots
+- `GET/POST/PUT /api/admin/surveys` plus publish; survey edits update the same survey row
 - `GET/POST /api/admin/cycles` plus rule, open, and close actions
 - `GET /api/evaluator/targets`, `GET /api/evaluator/targets/{id}/form`
 - `POST /api/evaluator/submit` (final; response body and user are not logged)
@@ -78,7 +78,7 @@ Management endpoints require the `admin` role. The `super_admin` role can access
 
 The participation ledger stores the evaluator account and a random submission token. Answers, comments, and score summaries refer to that token so they can be reviewed and retracted, but contain no user ID or email. The answer review endpoint queries answer/comment rows by token without joining `participation` or `users`; it redacts email addresses from free text and never returns the token with answer content. Only super admins can access evaluator-level mean scores and the office standing evaluator breakdown. The delete endpoint retracts aggregate counts and deletes the participation row, which cascades to its linked answer, comment, and score rows. The account deletion path performs the same retraction for each of the evaluator's submissions.
 
-The admin database account needs the permissions required by admin endpoints, including participation-token listing/deletion and answer/comment review. Restrict direct database access because the token can link a submission back to a participation row. The submit account needs setup-table reads, including `cycle_survey_snapshots` and `cycle_survey_questions`, and write access for `cycle_targets`, participation, answers, scores, tallies, counts, and comments. Evaluators can browse every target in the registry; when an evaluation is submitted, its target is linked to that cycle so administrative reporting includes it. Configure these separately with `ADMIN_DB_*` and `SUBMIT_DB_*`.
+The admin database account needs the permissions required by admin endpoints, including participation-token listing/deletion and answer/comment review. Restrict direct database access because the token can link a submission back to a participation row. The submit account needs setup-table reads and write access for `cycle_targets`, participation, answers, scores, tallies, counts, and comments. Evaluators can browse every target in the registry; when an evaluation is submitted, its target is linked to that cycle so administrative reporting includes it. Configure these separately with `ADMIN_DB_*` and `SUBMIT_DB_*`.
 
 Survey scoring is configurable: scale/rating and Yes answers use the selected value multiplied by the question weight; choice questions use configured option points; text answers are unscored. Section scores are summed for the total, and the mean is the total divided by the number of sections.
 

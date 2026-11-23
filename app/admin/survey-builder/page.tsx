@@ -4,9 +4,10 @@ import { FormEvent, useEffect, useState } from "react";
 import { apiFetch } from "../../lib/api";
 
 type QuestionType = "scale" | "rating" | "single_choice" | "multi_choice" | "yes_no" | "text";
-type ChoiceDraft = { label: string; points: number };
+type ChoiceDraft = { id?: number; label: string; points: number };
 type QuestionDraft = {
   id: string;
+  serverId?: number;
   text: string;
   type: QuestionType;
   required: boolean;
@@ -17,7 +18,7 @@ type QuestionDraft = {
   minLabel: string;
   maxLabel: string;
 };
-type SectionDraft = { id: string; title: string; questions: QuestionDraft[] };
+type SectionDraft = { id: string; serverId?: number; title: string; questions: QuestionDraft[] };
 type Survey = {
   id: number;
   title: string;
@@ -27,12 +28,14 @@ type Survey = {
 };
 type SurveyDetail = Survey & {
   sections: {
+    id: number;
     title: string;
     questions: {
+      id: number;
       question_text: string;
       type: QuestionType;
       required: boolean;
-      options: { label: string; points: number | string }[];
+      options: { id: number; label: string; points: number | string }[];
       score_weight: number | string;
       scale_min: number | null;
       scale_max: number | null;
@@ -153,7 +156,7 @@ function SurveyPreview({
   return (
     <div className="mx-auto max-w-3xl space-y-5">
       <section className="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-lg shadow-slate-200/50">
-        <div className="relative overflow-hidden bg-gradient-to-br from-[#1F3A5F] via-[#1a4a5f] to-[#0F9D8A] px-6 py-7 text-white sm:px-8">
+        <div className="relative overflow-hidden bg-linear-to-br from-[#1F3A5F] via-[#1a4a5f] to-[#0F9D8A] px-6 py-7 text-white sm:px-8">
           <div className="pointer-events-none absolute -right-16 -top-16 h-40 w-40 rounded-full bg-white/10 blur-2xl" aria-hidden="true" />
           <div className="relative">
             <span className="inline-flex items-center gap-2 rounded-full bg-white/10 px-3 py-1 text-xs font-semibold uppercase tracking-[0.14em] text-teal-100 ring-1 ring-white/20">
@@ -169,7 +172,7 @@ function SurveyPreview({
         <section key={section.id} className="space-y-4">
           {(sections.length > 1 || section.title) && (
             <div className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-white px-5 py-4 shadow-sm">
-              <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-[#1F3A5F] to-[#0F9D8A] text-xs font-bold text-white">
+              <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-linear-to-br from-[#1F3A5F] to-[#0F9D8A] text-xs font-bold text-white">
                 {sectionIndex + 1}
               </span>
               <div>
@@ -262,13 +265,16 @@ export default function SurveyBuilderPage() {
       setDescription(detail.description ?? "");
       setSections(detail.sections.map((section) => ({
         id: crypto.randomUUID(),
+        serverId: section.id,
         title: section.title,
         questions: section.questions.map((question) => ({
           id: crypto.randomUUID(),
+          serverId: question.id,
           text: question.question_text,
           type: question.type,
           required: question.required,
           options: question.options.map((option) => ({
+            id: option.id,
             label: option.label,
             points: Number(option.points),
           })),
@@ -293,32 +299,9 @@ export default function SurveyBuilderPage() {
     setNotice("");
     setBusySurveyId(survey.id);
     try {
-      const detail = await apiFetch<SurveyDetail>(`/api/admin/surveys/${survey.id}`);
-      setEditingSurveyId(null);
-      setTitle(`${detail.title} (copy)`);
-      setDescription(detail.description ?? "");
-      setSections(detail.sections.map((section) => ({
-        id: crypto.randomUUID(),
-        title: section.title,
-        questions: section.questions.map((question) => ({
-          id: crypto.randomUUID(),
-          text: question.question_text,
-          type: question.type,
-          required: question.required,
-          options: question.options.map((option) => ({
-            label: option.label,
-            points: Number(option.points),
-          })),
-          scoreWeight: Number(question.score_weight ?? 1),
-          scaleMin: question.scale_min ?? 1,
-          scaleMax: question.scale_max ?? 5,
-          minLabel: question.min_label ?? "",
-          maxLabel: question.max_label ?? "",
-        })),
-      })));
-      setPreviewMode(false);
-      setNotice("Loaded a copy into the editor. Save it to create a new survey.");
-      document.getElementById("survey-editor")?.scrollIntoView({ behavior: "smooth", block: "start" });
+      await apiFetch(`/api/admin/surveys/${survey.id}/clone`, { method: "POST" });
+      await loadSurveys();
+      setNotice("Survey duplicated.");
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : "The survey could not be duplicated.");
     } finally {
@@ -460,13 +443,16 @@ export default function SurveyBuilderPage() {
           title,
           description,
           sections: sections.map((section) => ({
+            id: section.serverId,
             title: section.title,
             questions: section.questions.map((question) => ({
+              id: question.serverId,
               text: question.text,
               type: question.type,
               required: question.required,
               options: ["single_choice", "multi_choice"].includes(question.type)
                 ? question.options.map((option) => ({
+                    id: option.id,
                     label: option.label.trim(),
                     points: option.points,
                   }))
@@ -596,7 +582,7 @@ export default function SurveyBuilderPage() {
         <form onSubmit={createSurvey} className="space-y-6">
           {/* Title / description */}
           <section className="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm">
-            <div className="h-1.5 bg-gradient-to-r from-[#1F3A5F] to-[#0F9D8A]" />
+            <div className="h-1.5 bg-linear-to-r from-[#1F3A5F] to-[#0F9D8A]" />
             <div className="grid gap-4 p-5 sm:p-6">
               <label className="text-sm font-semibold text-slate-700">
                 Survey title
@@ -626,10 +612,10 @@ export default function SurveyBuilderPage() {
             <section key={section.id} className="space-y-4 rounded-3xl border border-slate-200 bg-slate-100/70 p-4 sm:p-5">
               {/* Section header */}
               <div className="flex flex-wrap items-start gap-3 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-5">
-                <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-[#1F3A5F] to-[#0F9D8A] text-sm font-bold text-white shadow-sm">
+                <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-linear-to-br from-[#1F3A5F] to-[#0F9D8A] text-sm font-bold text-white shadow-sm">
                   {sectionIndex + 1}
                 </span>
-                <label className="min-w-[12rem] flex-1 text-sm font-semibold text-slate-700">
+                <label className="min-w-48 flex-1 text-sm font-semibold text-slate-700">
                   <span className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">Section title</span>
                   <input
                     required
@@ -924,7 +910,7 @@ export default function SurveyBuilderPage() {
             <button
               type="submit"
               disabled={saving || invalidScale}
-              className="rounded-xl bg-gradient-to-r from-[#0F9D8A] to-[#0C8575] px-5 py-2.5 text-sm font-semibold text-white shadow-md shadow-teal-600/20 transition hover:shadow-teal-600/30 disabled:cursor-not-allowed disabled:opacity-60 disabled:shadow-none"
+              className="rounded-xl bg-linear-to-r from-[#0F9D8A] to-[#0C8575] px-5 py-2.5 text-sm font-semibold text-white shadow-md shadow-teal-600/20 transition hover:shadow-teal-600/30 disabled:cursor-not-allowed disabled:opacity-60 disabled:shadow-none"
             >
               {saving ? "Saving…" : editingSurveyId ? "Update survey" : "Save draft"}
             </button>
