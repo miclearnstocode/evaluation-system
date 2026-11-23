@@ -171,8 +171,8 @@ export default function OfficeStandingPage({
 
       {!!items.length && (
         <section className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
-          <div className="max-h-[32rem] overflow-auto">
-            <table className="w-full min-w-[38rem] text-left text-sm">
+          <div className="max-h-128 overflow-auto">
+            <table className="w-full min-w-152 text-left text-sm">
               <thead>
                 <tr className="sticky top-0 bg-slate-50 text-[#1F3A5F]">
                   <th scope="col" className="px-5 py-3.5 font-semibold">Office</th>

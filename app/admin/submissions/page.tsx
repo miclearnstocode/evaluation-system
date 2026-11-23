@@ -22,13 +22,6 @@ type EvaluatorData = {
   mean_score: number | string | null;
 };
 
-function formatScore(score: number | string | null | undefined): string {
-  if (score === null || score === undefined) return "—";
-  const num = Number(score);
-  if (Number.isNaN(num)) return "—";
-  return num.toFixed(2);
-}
-
 function getAvatarColor(name: string) {
   const colors = ["bg-blue-100 text-blue-600", "bg-teal-100 text-teal-600", "bg-indigo-100 text-indigo-600", "bg-purple-100 text-purple-600"];
   const charCode = name.charCodeAt(0) || 0;
@@ -156,10 +149,10 @@ export default function SubmissionsPage() {
       
       {/* Top Bar */}
       <div className="border-b border-slate-200 bg-white px-6 py-5 sm:px-8">
-        <div className="mx-auto flex max-w-[1400px] flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div className="mx-auto flex max-w-350 flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div>
             <h1 className="text-2xl font-bold tracking-tight text-[#1F3A5F]">Evaluation Overview</h1>
-            <p className="mt-1 text-sm text-slate-500">Review the evaluators and their scores for each office.</p>
+            <p className="mt-1 text-sm text-slate-500">Review the evaluators and their status for each office.</p>
           </div>
           
           <div className="flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2 shadow-sm">
@@ -187,10 +180,10 @@ export default function SubmissionsPage() {
         </div>
       </div>
 
-      {error && <p className="mx-auto max-w-[1400px] mt-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</p>}
+      {error && <p className="mx-auto max-w-350 mt-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</p>}
 
       {/* Main Content Area */}
-      <div className="mx-auto flex max-w-[1400px] flex-col md:flex-row gap-6 p-4 sm:p-8">
+      <div className="mx-auto flex max-w-350 flex-col md:flex-row gap-6 p-4 sm:p-8">
         
         {/* Left Sidebar: Scrollable Office List */}
         <aside className="w-full md:w-80 shrink-0 flex flex-col rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden h-[calc(100vh-140px)]">
@@ -227,7 +220,7 @@ export default function SubmissionsPage() {
         {/* Right Side: Radial Diagram */}
         <main className="flex-1 min-w-0">
           {loadingSubmissions ? (
-            <div className="flex h-[600px] items-center justify-center rounded-3xl border border-slate-200 bg-white">
+            <div className="flex h-150 items-center justify-center rounded-3xl border border-slate-200 bg-white">
                <svg className="mr-3 h-8 w-8 animate-spin text-teal-600" viewBox="0 0 24 24" fill="none">
                 <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
                 <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
@@ -236,7 +229,7 @@ export default function SubmissionsPage() {
           ) : currentTarget ? (
             <div className="relative w-full overflow-x-auto rounded-3xl border border-slate-200 bg-white p-8 shadow-sm">
               
-              <div className="relative mx-auto h-[700px] min-w-[1000px]">
+              <div className="relative mx-auto h-175 min-w-250">
                 
                 {/* Connector Lines */}
                 <svg className="absolute inset-0 h-full w-full pointer-events-none">
@@ -256,10 +249,10 @@ export default function SubmissionsPage() {
 
                 {/* Center Office Hub */}
                 <div 
-                  className="absolute flex h-[220px] w-[220px] -translate-x-1/2 -translate-y-1/2 flex-col items-center justify-center rounded-full border-[10px] border-white bg-gradient-to-b from-blue-50 to-white shadow-xl shadow-blue-900/10"
+                  className="absolute flex h-55 w-55 -translate-x-1/2 -translate-y-1/2 flex-col items-center justify-center rounded-full border-10 border-white bg-linear-to-b from-blue-50 to-white shadow-xl shadow-blue-900/10"
                   style={{ left: centerX, top: centerY }}
                 >
-                  <div className="absolute inset-0 rounded-full border-[8px] border-transparent [background:linear-gradient(135deg,#0EA5E9,#10B981)_border-box] [-webkit-mask:linear-gradient(#fff_0_0)_padding-box,linear-gradient(#fff_0_0)] [-webkit-mask-composite:xor] [mask-composite:exclude] pointer-events-none opacity-80" />
+                  <div className="absolute inset-0 rounded-full border-8 border-transparent [background:linear-gradient(135deg,#0EA5E9,#10B981)_border-box] [-webkit-mask:linear-gradient(#fff_0_0)_padding-box,linear-gradient(#fff_0_0)] [-webkit-mask-composite:xor] mask-exclude pointer-events-none opacity-80" />
                   
                   <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="#1E3A8A" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="mb-2 h-12 w-12">
                     <path d="M3 21h18" />
@@ -286,7 +279,7 @@ export default function SubmissionsPage() {
                   return (
                     <Fragment key={e.user_id}>
                       <div
-                        className="absolute flex w-[280px] -translate-x-1/2 -translate-y-1/2 items-center gap-3 rounded-2xl border border-slate-100 bg-white p-3 shadow-lg shadow-slate-200/50 transition hover:scale-105"
+                        className="absolute flex w-70 -translate-x-1/2 -translate-y-1/2 items-center gap-3 rounded-2xl border border-slate-100 bg-white p-3 shadow-lg shadow-slate-200/50 transition hover:scale-105"
                         style={{ left: e.x, top: e.y }}
                       >
                         <div className="relative">
@@ -304,9 +297,7 @@ export default function SubmissionsPage() {
                         
                         <div className="flex-1 min-w-0">
                           <p className="truncate text-sm font-bold text-slate-800">{fullName}</p>
-                          <p className={`text-xs font-semibold ${isSubmitted ? 'text-blue-600' : 'text-slate-400'}`}>
-                            Score: {isSubmitted ? formatScore(e.mean_score) : "—"}
-                          </p>
+                          
                           {isSubmitted ? (
                             <div className="mt-1 flex items-center gap-1 text-[11px] font-medium text-green-600">
                               <div className="flex h-4 w-4 items-center justify-center rounded-full bg-green-100">

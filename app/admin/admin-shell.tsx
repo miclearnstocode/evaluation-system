@@ -7,7 +7,6 @@ import { apiFetch } from "../lib/api";
 
 const links = [
   ["Dashboard", "/admin/dashboard"],
-  ["Live Office Standing", "/admin/standing"],
   ["Campuses", "/admin/campuses"],
   ["Evaluation Targets", "/admin/targets"],
   ["Users", "/admin/users"],
@@ -15,7 +14,6 @@ const links = [
   ["Cycles", "/admin/cycles"],
   ["Participation", "/admin/participation"],
   ["Review Submissions", "/admin/submissions"],
-  ["Comments", "/admin/comments"],
   ["Audit Log", "/admin/audit-log"],
 ];
 

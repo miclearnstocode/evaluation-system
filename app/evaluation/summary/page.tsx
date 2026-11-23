@@ -79,7 +79,7 @@ function EvaluationSummaryContent() {
       : "";
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 via-white to-teal-50/40 text-slate-900">
+    <div className="min-h-screen bg-linear-to-br from-slate-50 via-white to-teal-50/40 text-slate-900">
       <EvaluatorHeader currentPage="evaluations" />
       <main className="mx-auto max-w-4xl space-y-6 px-5 py-8 sm:py-10">
         <div>

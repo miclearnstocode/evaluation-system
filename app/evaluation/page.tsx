@@ -169,7 +169,7 @@ export default function MyEvaluationsPage() {
       : "Search or select an evaluation target";
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 via-white to-teal-50/40 text-slate-900">
+    <div className="min-h-screen bg-linear-to-br from-slate-50 via-white to-teal-50/40 text-slate-900">
       <EvaluatorHeader currentPage="evaluations" />
       <main className="mx-auto max-w-6xl space-y-6 px-5 py-8 sm:py-10">
         {/* Page heading */}
@@ -189,7 +189,7 @@ export default function MyEvaluationsPage() {
         </div>
 
         {/* Info banner */}
-        <div className="flex items-start gap-3 rounded-2xl border border-teal-200 bg-gradient-to-r from-teal-50 to-white px-4 py-4 shadow-sm sm:px-5">
+        <div className="flex items-start gap-3 rounded-2xl border border-teal-200 bg-linear-to-r from-teal-50 to-white px-4 py-4 shadow-sm sm:px-5">
           <span
             aria-hidden="true"
             className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-white text-teal-700 ring-1 ring-teal-600/20"
@@ -439,7 +439,7 @@ export default function MyEvaluationsPage() {
           )}
 
           {selected && (
-            <div className="mt-6 overflow-hidden rounded-2xl border border-slate-200 bg-gradient-to-br from-slate-50 to-white shadow-sm">
+            <div className="mt-6 overflow-hidden rounded-2xl border border-slate-200 bg-linear-to-br from-slate-50 to-white shadow-sm">
               <div className="flex flex-col gap-4 p-5 sm:flex-row sm:items-center sm:justify-between">
                 <div className="min-w-0">
                   <div className="flex items-center gap-2">
@@ -496,7 +496,7 @@ export default function MyEvaluationsPage() {
                     type="button"
                     disabled={selected.cycle_id === null}
                     onClick={startSelectedEvaluation}
-                    className="group inline-flex shrink-0 items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-[#0F9D8A] to-[#0C8575] px-5 py-3 text-sm font-semibold text-white shadow-lg shadow-teal-600/20 transition hover:shadow-teal-600/30 disabled:cursor-not-allowed disabled:opacity-50 disabled:shadow-none"
+                    className="group inline-flex shrink-0 items-center justify-center gap-2 rounded-xl bg-linear-to-r from-[#0F9D8A] to-[#0C8575] px-5 py-3 text-sm font-semibold text-white shadow-lg shadow-teal-600/20 transition hover:shadow-teal-600/30 disabled:cursor-not-allowed disabled:opacity-50 disabled:shadow-none"
                   >
                     {selected.cycle_id === null ? "No open cycle" : "Start evaluation"}
                     {selected.cycle_id !== null && (

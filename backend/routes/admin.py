@@ -284,12 +284,16 @@ def list_administrators():
         cursor = conn.cursor(dictionary=True)
         rows = fetch_all(
             cursor,
-            "SELECT tc.id, tc.id AS office_id, tc.name, NULL AS position, tc.active, "
+            "SELECT tc.id, tc.id AS office_id, tc.name, tc.active, "
             "tc.name AS office_name, tc.campus_id, c.name AS campus_name, "
             "tc.target_type FROM target_catalog tc "
             "LEFT JOIN campuses c ON c.id = tc.campus_id "
             "WHERE tc.target_type IN ('campus_administrator', 'satellite_college_director') "
-            "ORDER BY tc.name",)
+            "ORDER BY tc.name",
+        )
+        for row in rows:
+            row["position"] = None
+            row["full_name"] = row["name"]
         cursor.close()
     return jsonify(items=rows)
 
@@ -404,14 +408,14 @@ def list_users():
         cursor = conn.cursor(dictionary=True)
         rows = fetch_all(
             cursor,
-            "SELECT u.id, u.email, u.role, u.campus_id, u.position_role, "
-            "NULL AS office_unit_code, u.years_of_service, u.is_central_staff, "
-            "u.active, c.name AS campus_name, "
+            "SELECT u.id, u.first_name, u.last_name, u.email, u.role, u.campus_id, "
+            "u.position_role, NULL AS office_unit_code, u.years_of_service, "
+            "u.is_central_staff, u.active, c.name AS campus_name, "
             "GROUP_CONCAT(tc.name ORDER BY tc.name SEPARATOR ', ') AS office_unit_name "
             "FROM users u LEFT JOIN campuses c ON c.id = u.campus_id "
             "LEFT JOIN user_office_assignments ua ON ua.user_id = u.id "
             "LEFT JOIN target_catalog tc ON tc.id = ua.target_id "
-            "GROUP BY u.id, c.name ORDER BY u.email",
+            "GROUP BY u.id, c.name ORDER BY u.last_name, u.first_name",
         )
         cursor.close()
     return jsonify(items=rows)
@@ -424,24 +428,33 @@ def create_user():
     email = payload.get("email")
     password = payload.get("password")
     role = payload.get("role")
+    first_name = str(payload.get("first_name", "")).strip()
+    last_name = str(payload.get("last_name", "")).strip()
+
+    if not first_name or len(first_name) > 100:
+        raise ApiError("A valid first name is required.")
+    if not last_name or len(last_name) > 100:
+        raise ApiError("A valid last name is required.")
     if not isinstance(email, str) or len(email.strip()) > 190 or "@" not in email:
         raise ApiError("A valid email is required.")
     if not isinstance(password, str) or len(password) < 12:
         raise ApiError("Password must contain at least 12 characters.")
-    if not isinstance(role, str) or role not in {"admin", "super_admin"}:
-        raise ApiError("Only admin and super-admin accounts can be created here.")
+
+    # Super admin is a singleton and cannot be created through this endpoint.
+    if role == "super_admin":
+        raise ApiError("A super admin account already exists and cannot be created.", 409)
+    if not isinstance(role, str) or role != "admin":
+        raise ApiError("Only admin accounts can be created here.", 409)
+
     with connection() as conn:
-        cursor = conn.cursor()
+        cursor = conn.cursor(dictionary=True)
         cursor.execute(
-            "INSERT INTO users (email, password_hash, role, active) "
-            "VALUES (%s, %s, %s, 1)",
-            (
-                email.strip().lower(),
-                generate_password_hash(password),
-                role,
-            ),
+            "INSERT INTO users (first_name, last_name, email, password_hash, role, active) "
+            "VALUES (%s, %s, %s, %s, 'admin', 1)",
+            (first_name, last_name, email.strip().lower(), generate_password_hash(password)),
         )
         user_id = cursor.lastrowid
+        _audit(cursor, request_user(), "create", "user", user_id)
         conn.commit()
         cursor.close()
     return jsonify(id=user_id), 201
@@ -456,7 +469,7 @@ def update_user(user_id: int):
         raise ApiError("Only account active status can be changed here.")
     active = _bool_value(payload.get("active"), "active")
     if user_id == actor["id"] and not active:
-        raise ApiError("You cannot deactivate or demote your own account.")
+        raise ApiError("You cannot deactivate your own account.")
     with connection() as conn:
         cursor = conn.cursor(dictionary=True)
         existing = fetch_one(
@@ -466,50 +479,12 @@ def update_user(user_id: int):
         )
         if not existing:
             raise ApiError("User not found.", 404)
-        removes_admin = existing["role"] == "super_admin" and not active
-        if removes_admin:
-            active_admins = fetch_one(
-                cursor,
-                "SELECT COUNT(*) AS total FROM users WHERE role = 'super_admin' AND active = 1",
-            )
-            if active_admins["total"] <= 2:
-                raise ApiError("At least two active super admin accounts must be kept.")
+        if existing["role"] == "super_admin" and not active:
+            raise ApiError("The super admin account cannot be deactivated.", 409)
         cursor.execute("UPDATE users SET active = %s WHERE id = %s", (active, user_id))
         conn.commit()
         cursor.close()
     return jsonify(status="ok")
-
-
-@bp.delete("/api/admin/users/<int:user_id>")
-@require_role("admin")
-def delete_user(user_id: int):
-    actor = request_user()
-    with connection() as conn:
-        cursor = conn.cursor(dictionary=True)
-        existing = fetch_one(cursor, "SELECT role FROM users WHERE id = %s", (user_id,))
-        if not existing:
-            raise ApiError("User not found.", 404)
-        if existing["role"] != "evaluator":
-            raise ApiError("Only evaluator accounts can be deleted here.", 409)
-
-        conn.start_transaction()
-        try:
-            tokens = fetch_all(
-                cursor,
-                "SELECT submission_token FROM participation WHERE user_id = %s",
-                (user_id,),
-            )
-            for row in tokens:
-                _retract_submission(cursor, row["submission_token"])
-            _audit(cursor, actor, "delete", "user", user_id)
-            cursor.execute("DELETE FROM users WHERE id = %s", (user_id,))
-            conn.commit()
-        except Exception:
-            conn.rollback()
-            raise
-        finally:
-            cursor.close()
-    return jsonify(status="deleted")
 
 
 @bp.get("/api/admin/surveys")
@@ -986,6 +961,9 @@ def office_standing():
                 ]
                 item["evaluator_means"] = [
                     {
+                        "name": " ".join(
+                            part for part in (row.get("first_name"), row.get("last_name")) if part
+                        ) or row["evaluator_email"],
                         "email": row["evaluator_email"],
                         "mean_score": float(row["mean_score"]),
                     }
@@ -1023,7 +1001,6 @@ def list_submissions():
         if not _load_cycle_target(cursor, cycle_id, target_id):
             raise ApiError("Target not found in this cycle.", 404)
             
-        # Fetch ALL active evaluators, LEFT JOIN their submission and score
         items = fetch_all(
             cursor,
             "SELECT u.id AS user_id, u.first_name, u.last_name, u.email AS evaluator_email, "
@@ -1035,6 +1012,10 @@ def list_submissions():
             "ORDER BY u.first_name, u.last_name",
             (cycle_id, target_id),
         )
+        for item in items:
+            item["full_name"] = " ".join(
+                part for part in (item.get("first_name"), item.get("last_name")) if part
+            ) or item.get("evaluator_email")
         
         valid_scores = []
         for item in items:
@@ -1242,8 +1223,12 @@ def results():
         )
         score_rows = fetch_all(
             cursor,
-            "SELECT response_id, total_score, mean_score, section_scores "
-            "FROM evaluator_response_scores WHERE cycle_id = %s AND target_id = %s ORDER BY RAND()",
+            "SELECT ers.response_id, ers.total_score, ers.mean_score, ers.section_scores, "
+            "u.first_name, u.last_name, u.email AS evaluator_email "
+            "FROM evaluator_response_scores ers "
+            "LEFT JOIN participation p ON p.submission_token = ers.score_link_token "
+            "LEFT JOIN users u ON u.id = p.user_id "
+            "WHERE ers.cycle_id = %s AND ers.target_id = %s ORDER BY RAND()",
             (cycle_id, target_id),
         )
         questions_by_id = {

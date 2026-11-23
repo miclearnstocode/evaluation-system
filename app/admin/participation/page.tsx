@@ -178,7 +178,7 @@ export default function AdminParticipationPage() {
             <p className="text-xs font-semibold uppercase tracking-wider text-slate-500">Total Submissions</p>
             <p className="mt-2 text-3xl font-bold text-[#1F3A5F]">{totals.submitted}</p>
           </div>
-          <div className="rounded-2xl border border-teal-100 bg-gradient-to-br from-teal-50 to-white p-5 shadow-sm ring-1 ring-teal-600/10">
+          <div className="rounded-2xl border border-teal-100 bg-linear-to-br from-teal-50 to-white p-5 shadow-sm ring-1 ring-teal-600/10">
             <p className="text-xs font-semibold uppercase tracking-wider text-teal-800">Overall Completion Rate</p>
             <div className="mt-2 flex items-baseline gap-2">
               <p className="text-3xl font-bold text-teal-900">{overallPercent}%</p>
