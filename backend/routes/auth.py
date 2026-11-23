@@ -14,6 +14,7 @@ POSITION_ROLES = [
     {"value": "student_leader", "label": "Student Leader / SSC & FLP Officials"},
     {"value": "campus_administrator_satellite_director", "label": "Campus Administrator / Satellite College Director"},
     {"value": "director", "label": "Director"},
+    {"value": "vice_president", "label": "Vice President"},
 ]
 
 SERVICE_YEARS = [
@@ -25,12 +26,22 @@ SERVICE_YEARS = [
 SERVICE_YEAR_CODES = {item["value"] for item in SERVICE_YEARS}
 
 OFFICE_SOURCES = [
+    ("vice_president", "vice_presidents", False, "vice_president_id"),
     ("campus_administrator", "campus_administrators", True, "campus_administrator_id"),
     ("satellite_college_director", "satellite_college_directors", True, "satellite_college_director_id"),
-    ("director", "directors", False, "director_id"),
     ("rde_director", "rde_directors", False, "rde_director_id"),
     ("rde_center_director", "rde_center_directors", False, "rde_center_director_id"),
+    ("director", "directors", False, "director_id"),
 ]
+
+OFFICE_SECTION_LABELS = {
+    "vice_president": "Vice President offices",
+    "campus_administrator": "Campus Administrator",
+    "satellite_college_director": "Satellite College Directors",
+    "rde_director": "RDE Directors",
+    "rde_center_director": "RDE Center",
+    "director": "Director",
+}
 
 
 def _password_matches(password_hash: str, password: str) -> bool:
@@ -94,6 +105,7 @@ def registration_options():
         )
 
         memberships = []
+        office_sections = []
         units = []
         head_offices = []
 
@@ -104,14 +116,15 @@ def registration_options():
                     cursor,
                     f"SELECT code, title AS name FROM `{table}` "
                     "WHERE campus_id IN (SELECT id FROM campuses WHERE active = 1) "
-                    "ORDER BY title",
+                    "ORDER BY id",
                 )
             else:
                 rows = fetch_all(
                     cursor,
-                    f"SELECT code, title AS name FROM `{table}` ORDER BY title",
+                    f"SELECT code, title AS name FROM `{table}` ORDER BY id",
                 )
 
+            section_offices = []
             for row in rows:
                 entry = {
                     "code": row["code"],
@@ -120,7 +133,7 @@ def registration_options():
                     "campus": None,
                     "category": category,
                 }
-                memberships.append(
+                section_offices.append(
                     {
                         "id": row["code"],
                         "name": row["name"],
@@ -133,6 +146,14 @@ def registration_options():
                 else:
                     head_offices.append(entry)
 
+            if section_offices:
+                memberships.extend(section_offices)
+                office_sections.append({
+                    "target_type": target_type,
+                    "label": OFFICE_SECTION_LABELS[target_type],
+                    "offices": section_offices,
+                })
+
         cursor.close()
 
     memberships.sort(key=lambda m: m["name"].lower())
@@ -144,6 +165,7 @@ def registration_options():
         locations=locations,
         service_years=SERVICE_YEARS,
         memberships=memberships,
+        office_sections=office_sections,
         units=units,
         head_offices=head_offices,
         supervisors=[],
@@ -272,7 +294,7 @@ def register():
                     is_central = (
                         bool(office["campus_is_central"])
                         if office["campus_id"] is not None
-                        else target_type == "director"
+                        else target_type in {"vice_president", "director"}
                     )
                     try:
                         cursor.execute(

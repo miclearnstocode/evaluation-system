@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { FormEvent, useEffect, useState } from "react";
 import { apiFetch } from "../lib/api";
-import { TARGET_TYPE_LABELS, type TargetType } from "../lib/targets";
+import type { TargetType } from "../lib/targets";
 
 type SelectOption = { value: string; label: string };
 type MembershipOption = { id: string; name: string; unit_code: string; target_type: TargetType };
@@ -12,16 +12,13 @@ type RegistrationOptions = {
   locations: { code: string; name: string }[];
   service_years: SelectOption[];
   memberships: MembershipOption[];
+  office_sections: { target_type: TargetType; label: string; offices: MembershipOption[] }[];
 };
 
 const fieldClassName =
   "mt-1.5 w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-teal-600 focus:ring-4 focus:ring-teal-600/10 disabled:bg-slate-100 disabled:text-slate-500";
 
 const labelClassName = "block text-sm font-semibold text-slate-700";
-
-function targetTypeLabel(targetType: string): string {
-  return (TARGET_TYPE_LABELS as Record<string, string>)[targetType] ?? targetType;
-}
 
 function EyeIcon({ open }: { open: boolean }) {
   return open ? (
@@ -427,39 +424,43 @@ export default function RegisterPage() {
                             No offices/units are available right now.
                           </p>
                         ) : (
-                          <div className="grid max-h-72 gap-2 overflow-y-auto pr-1 sm:grid-cols-2">
-                            {officeChoices.map((office) => {
-                              const checked = selectedOfficeCodes.includes(office.unit_code);
-                              return (
-                                <label
-                                  key={office.id}
-                                  className={`flex cursor-pointer items-start gap-3 rounded-xl border px-3.5 py-3 text-sm transition ${
-                                    checked
-                                      ? "border-teal-500 bg-teal-50/70 ring-1 ring-teal-500/20"
-                                      : "border-slate-200 bg-white hover:border-slate-300 hover:bg-slate-50"
-                                  }`}
-                                >
-                                  <input
-                                    type="checkbox"
-                                    checked={checked}
-                                    onChange={(event) => {
-                                      setSelectedOfficeCodes((current) =>
-                                        event.target.checked
-                                          ? [...current, office.unit_code]
-                                          : current.filter((code) => code !== office.unit_code),
-                                      );
-                                    }}
-                                    className="mt-0.5 h-4 w-4 shrink-0 rounded accent-[#0F9D8A]"
-                                  />
-                                  <span className="flex-1">
-                                    <span className="block font-medium text-slate-800">{office.name}</span>
-                                    <span className="mt-0.5 inline-block rounded bg-slate-100 px-1.5 py-0.5 text-[11px] font-medium text-slate-500">
-                                      {targetTypeLabel(office.target_type)}
-                                    </span>
-                                  </span>
-                                </label>
-                              );
-                            })}
+                          <div className="max-h-72 space-y-4 overflow-y-auto pr-1">
+                            {options.office_sections.map(({ target_type, label, offices }) => (
+                              <fieldset key={target_type}>
+                                <legend className="mb-2 text-sm font-semibold text-slate-700">{label}</legend>
+                                <div className="grid gap-2 sm:grid-cols-2">
+                                  {offices.map((office) => {
+                                    const checked = selectedOfficeCodes.includes(office.unit_code);
+                                    return (
+                                      <label
+                                        key={office.id}
+                                        className={`flex cursor-pointer items-start gap-3 rounded-xl border px-3.5 py-3 text-sm transition ${
+                                          checked
+                                            ? "border-teal-500 bg-teal-50/70 ring-1 ring-teal-500/20"
+                                            : "border-slate-200 bg-white hover:border-slate-300 hover:bg-slate-50"
+                                        }`}
+                                      >
+                                        <input
+                                          type="checkbox"
+                                          checked={checked}
+                                          onChange={(event) => {
+                                            setSelectedOfficeCodes((current) =>
+                                              event.target.checked
+                                                ? [...current, office.unit_code]
+                                                : current.filter((code) => code !== office.unit_code),
+                                            );
+                                          }}
+                                          className="mt-0.5 h-4 w-4 shrink-0 rounded accent-[#0F9D8A]"
+                                        />
+                                        <span className="flex-1">
+                                          <span className="block font-medium text-slate-800">{office.name}</span>
+                                        </span>
+                                      </label>
+                                    );
+                                  })}
+                                </div>
+                              </fieldset>
+                            ))}
                           </div>
                         )}
                       </fieldset>
