@@ -16,7 +16,8 @@ def _load_evaluator_target(cursor: Any, target_id: int) -> dict[str, Any] | None
     return fetch_one(
         cursor,
         "SELECT t.id, t.target_type, COALESCE(tc.campus_id, t.campus_id) AS campus_id, "
-        "t.is_central, COALESCE(tc.name, t.office_head_name, "
+        "t.is_central, t.office_head_name, "
+        "COALESCE(tc.name, t.office_head_name, "
         "CONCAT(REPLACE(t.target_type, '_', ' '), ' #', t.id)) AS target_name, "
         "c.name AS campus_name FROM targets t "
         "LEFT JOIN target_catalog tc ON tc.id = t.id "
@@ -41,6 +42,7 @@ def evaluator_targets():
             cursor,
             "SELECT t.id AS target_id, t.target_type, "
             "COALESCE(tc.campus_id, t.campus_id) AS campus_id, t.is_central, "
+            "t.office_head_name, "
             "COALESCE(tc.name, t.office_head_name, "
             "CONCAT(REPLACE(t.target_type, '_', ' '), ' #', t.id)) AS target_name, "
             "c.name AS campus_name FROM targets t "
@@ -69,6 +71,7 @@ def evaluator_targets():
                         "target_id": target["target_id"],
                         "target_type": target["target_type"],
                         "target_name": target["target_name"],
+                        "office_head_name": target["office_head_name"],
                         "campus_name": target["campus_name"],
                         "is_central": target["is_central"],
                         "submitted": previous is not None,
@@ -82,6 +85,7 @@ def evaluator_targets():
                     "target_id": target["target_id"],
                     "target_type": target["target_type"],
                     "target_name": target["target_name"],
+                    "office_head_name": target["office_head_name"],
                     "campus_name": target["campus_name"],
                     "is_central": target["is_central"],
                     "submitted": False,

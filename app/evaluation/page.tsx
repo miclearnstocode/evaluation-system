@@ -401,7 +401,7 @@ export default function MyEvaluationsPage() {
                           </span>
                           <span className="mt-0.5 block truncate text-xs text-slate-500">
                             {evaluation.office_head_name ? `${evaluation.office_head_name} · ` : ""}
-                            {locationOf(evaluation)} · {evaluation.cycle_name ?? "No open cycle"}
+                            {locationOf(evaluation)}
                           </span>
                         </span>
                         <span
