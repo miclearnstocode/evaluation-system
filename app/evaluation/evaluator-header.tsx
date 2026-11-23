@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import Image from "next/image";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { apiFetch } from "../lib/api";
@@ -27,9 +28,13 @@ export default function EvaluatorHeader({ currentPage }: { currentPage: string }
     <header className="border-b border-slate-200 bg-white">
       <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-4 px-5 py-4">
         <Link href="/evaluation" className="flex items-center gap-3">
-          <span className="flex h-10 w-10 items-center justify-center rounded-lg bg-[#1F3A5F] text-sm font-bold text-white">
-            AES
-          </span>
+          <Image
+            src="/capsu-logo.png"
+            alt="Capiz State University"
+            width={44}
+            height={44}
+            className="h-11 w-11 rounded-lg object-contain"
+          />
           <span>
             <span className="block font-semibold tracking-tight text-[#1F3A5F]">CAPSU Evaluation Portal</span>
             <span className="block text-xs text-slate-500">Evaluator</span>

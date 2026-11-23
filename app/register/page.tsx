@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import Image from "next/image";
 import { FormEvent, useEffect, useState } from "react";
 import { apiFetch } from "../lib/api";
 import type { TargetType } from "../lib/targets";
@@ -232,11 +233,15 @@ export default function RegisterPage() {
       <header className="sticky top-0 z-20 border-b border-slate-200/70 bg-white/80 backdrop-blur-md">
         <div className="mx-auto flex max-w-6xl items-center justify-between px-5 py-4">
           <Link href="/" className="flex items-center gap-3">
-            <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-linear-to-br from-[#1F3A5F] to-[#0F9D8A] text-sm font-bold text-white shadow-md shadow-teal-900/20">
-              AES
-            </span>
+            <Image
+              src="/capsu-logo.png"
+              alt="Capiz State University"
+              width={44}
+              height={44}
+              className="h-11 w-11 rounded-lg object-contain"
+            />
             <span className="hidden font-semibold tracking-tight text-[#1F3A5F] sm:block">
-              Anonymous Evaluation System
+              CAPSU Evaluation System
             </span>
           </Link>
           <Link

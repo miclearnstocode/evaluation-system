@@ -1,6 +1,5 @@
 import type { NextConfig } from "next";
-
-const isExport = process.env.NEXT_EXPORT === "1";
+import { PHASE_PRODUCTION_BUILD } from "next/constants";
 
 const baseConfig: NextConfig = {
   trailingSlash: true,
@@ -25,22 +24,22 @@ const baseConfig: NextConfig = {
   },
 };
 
-const nextConfig: NextConfig = isExport
-  ? {
-      ...baseConfig,
-      output: "export",
-    }
-  : {
-      ...baseConfig,
+export default function config(phase: string): NextConfig {
+  // `npm run build` -> static export into out/
+  if (phase === PHASE_PRODUCTION_BUILD) {
+    return { ...baseConfig, output: "export" };
+  }
 
-      async rewrites() {
-        return [
-          {
-            source: "/api/:path*",
-            destination: `${process.env.BACKEND_API_URL ?? "http://127.0.0.1:5200"}/api/:path*`,
-          },
-        ];
-      },
-    };
-
-export default nextConfig;
+  // `npm run dev` -> proxy /api to the Flask backend
+  return {
+    ...baseConfig,
+    async rewrites() {
+      return [
+        {
+          source: "/api/:path*",
+          destination: `${process.env.BACKEND_API_URL ?? "http://127.0.0.1:5200"}/api/:path*`,
+        },
+      ];
+    },
+  };
+}

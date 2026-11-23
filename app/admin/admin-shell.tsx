@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import Image from "next/image";
 import { usePathname, useRouter } from "next/navigation";
 import { type ReactNode, useEffect, useRef, useState } from "react";
 import { apiFetch } from "../lib/api";
@@ -139,7 +140,13 @@ export default function AdminShell({ children, audience = "admin" }: { children:
     return (
       <main className="flex min-h-screen items-center justify-center bg-linear-to-br from-slate-100 via-white to-teal-50 px-5">
         <div className="w-full max-w-sm rounded-3xl border border-slate-200 bg-white p-8 text-center shadow-lg shadow-slate-900/5">
-          <span aria-hidden="true" className="mx-auto mb-4 grid h-12 w-12 place-items-center rounded-2xl bg-[#1F3A5F] text-sm font-bold text-white">CES</span>
+          <Image
+            src="/capsu-logo.png"
+            alt="Capiz State University"
+            width={56}
+            height={56}
+            className="mx-auto mb-4 h-14 w-14 object-contain"
+          />
           {sessionError ? (
             <>
               <p role="alert" className="text-sm text-red-700">{sessionError}</p>
@@ -169,7 +176,14 @@ export default function AdminShell({ children, audience = "admin" }: { children:
       <div className="flex min-h-screen flex-col md:flex-row">
         <aside className="hidden shrink-0 bg-linear-to-b from-[#162B46] to-[#1F3A5F] text-white md:sticky md:top-0 md:flex md:h-dvh md:w-56 md:flex-col md:self-start lg:w-60">
           <Link href={homeHref} className="flex items-center gap-3 border-b border-white/10 px-4 py-5 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-teal-200">
-            <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl border border-teal-300/25 bg-teal-300/15 text-sm font-bold text-teal-100" aria-hidden="true">CES</span>
+            <Image
+              src="/capsu-logo.png"
+              alt=""
+              aria-hidden="true"
+              width={44}
+              height={44}
+              className="h-11 w-11 shrink-0 rounded-lg object-contain"
+            />
             <span className="text-sm font-semibold leading-tight">CAPSU Evaluation Portal</span>
           </Link>
           <div className="min-h-0 flex-1 overflow-y-auto py-2">
