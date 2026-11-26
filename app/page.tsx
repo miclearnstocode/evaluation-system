@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import Image from "next/image";
+import AuthBuilding from "./components/auth-building";
 import { FormEvent, useState } from "react";
 import { apiFetch } from "./lib/api";
 
@@ -59,40 +60,30 @@ export default function LoginPage() {
     "w-full rounded-xl border border-slate-300 bg-white pl-11 pr-4 py-3 text-sm text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-teal-600 focus:ring-4 focus:ring-teal-600/10 disabled:bg-slate-100";
 
   return (
-    <main className="min-h-screen bg-linear-to-br from-slate-50 via-white to-teal-50/40 text-slate-900">
+    <main className="relative isolate min-h-screen bg-linear-to-br from-slate-50 via-white to-teal-50/40 text-slate-900">
+      <AuthBuilding />
       {/* Header */}
       <header className="sticky top-0 z-20 border-b border-slate-200/70 bg-white/80 backdrop-blur-md">
-        <div className="mx-auto flex max-w-6xl items-center justify-between px-5 py-4">
-          <Link href="/" className="flex items-center gap-3">
+        <div className="mx-auto flex max-w-6xl items-center px-4 py-4 sm:px-5">
+          <Link href="/" className="flex min-w-0 items-center gap-2 sm:gap-3">
             <Image
               src="/capsu-logo.png"
               alt="Capiz State University"
               width={44}
               height={44}
-              className="h-11 w-11 rounded-lg object-contain"
+              className="size-9 shrink-0 rounded-lg object-contain sm:size-11"
             />
-            <span className="hidden font-semibold tracking-tight text-[#1F3A5F] sm:block">
+            <span className="min-w-0 text-sm font-semibold leading-tight tracking-tight text-[#1F3A5F] sm:text-base">
               CAPSU Evaluation System
             </span>
-          </Link>
-          <Link
-            href="/register"
-            className="inline-flex items-center gap-1.5 rounded-full border border-[#0F9D8A] bg-white px-4 py-2 text-sm font-semibold text-[#087f70] transition hover:bg-teal-50"
-          >
-            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4" aria-hidden="true">
-              <line x1="12" y1="5" x2="12" y2="19" />
-              <line x1="5" y1="12" x2="19" y2="12" />
-            </svg>
-            <span className="hidden sm:inline">Create evaluator account</span>
-            <span className="sm:hidden">Register</span>
           </Link>
         </div>
       </header>
 
-      <div className="mx-auto grid min-h-[calc(100vh-73px)] max-w-6xl items-center gap-10 px-5 py-10 md:grid-cols-2 lg:gap-16 lg:py-14">
+      <div className="mx-auto grid min-h-[calc(100dvh-73px)] max-w-6xl items-center gap-6 px-4 py-7 sm:px-6 md:grid-cols-2 lg:px-8 lg:py-10 xl:gap-8">
         {/* Left: Brand / value proposition */}
-        <div className="order-2 md:order-1">
-          <div className="relative overflow-hidden rounded-3xl bg-linear-to-br from-[#1F3A5F] via-[#1a4a5f] to-[#0F9D8A] p-8 text-white shadow-xl shadow-teal-900/20 sm:p-10">
+        <div className="order-2 min-w-0 md:order-1">
+          <div className="relative overflow-hidden rounded-3xl bg-linear-to-br from-[#1F3A5F] via-[#1a4a5f] to-[#0F9D8A] p-6 text-white shadow-xl shadow-teal-900/20 xl:p-8">
             {/* Decorative blobs */}
             <div className="pointer-events-none absolute -right-16 -top-16 h-48 w-48 rounded-full bg-white/10 blur-2xl" aria-hidden="true" />
             <div className="pointer-events-none absolute -bottom-20 -left-16 h-56 w-56 rounded-full bg-teal-300/20 blur-3xl" aria-hidden="true" />
@@ -102,7 +93,7 @@ export default function LoginPage() {
                 <span className="h-1.5 w-1.5 rounded-full bg-teal-300" aria-hidden="true" />
                 CAPSU Evaluation Portal
               </span>
-              <h1 className="mt-5 text-3xl font-bold leading-tight tracking-tight sm:text-4xl">
+              <h1 className="mt-5 text-3xl font-bold leading-tight tracking-tight xl:text-4xl">
                 Your feedback helps us improve.
               </h1>
               <p className="mt-4 max-w-md text-sm leading-6 text-teal-50/90 sm:text-base">
@@ -146,8 +137,8 @@ export default function LoginPage() {
           </div>
         </div>
 
-        {/* Right: Login form */}
-        <div className="order-1 w-full md:order-2">
+        {/* Login form */}
+        <div className="order-1 min-w-0 md:order-2">
           <div className="mx-auto w-full max-w-md rounded-3xl border border-slate-200 bg-white p-7 shadow-lg shadow-slate-200/50 sm:p-9">
             <div className="mb-7 text-center">
               <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-2xl bg-teal-50 text-teal-700 ring-1 ring-teal-600/20">

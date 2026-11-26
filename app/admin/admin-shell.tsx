@@ -24,6 +24,7 @@ const navigationGroups = [
     ],
   },
   { label: "System", links: [["Audit Log", "/admin/audit-log"]] },
+  { label: "Help", links: [["Tutorial", "/admin/tutorial"]] },
 ] as const;
 
 const superAdminNavigationGroups = [

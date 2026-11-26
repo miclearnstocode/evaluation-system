@@ -5,8 +5,8 @@ export default function ThankYouPage() {
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900">
       <EvaluatorHeader currentPage="thank-you" />
-      <main className="mx-auto flex max-w-3xl justify-center px-5 py-12 sm:py-20">
-        <section className="w-full rounded-xl border border-slate-200 bg-white p-7 text-center shadow-sm sm:p-10">
+      <main className="mx-auto flex max-w-3xl justify-center px-3 py-8 sm:px-5 sm:py-20">
+        <section className="w-full rounded-xl border border-slate-200 bg-white p-5 text-center shadow-sm sm:p-10">
           <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-teal-50 text-2xl font-bold text-teal-800" aria-hidden="true">
             ✓
           </div>
@@ -18,7 +18,7 @@ export default function ThankYouPage() {
           </p>
           <Link
             href="/evaluation"
-            className="mt-7 inline-flex rounded-lg bg-[#0F9D8A] px-5 py-3 text-sm font-semibold text-white transition hover:bg-[#0C8575]"
+            className="mt-7 inline-flex min-h-11 w-full items-center justify-center rounded-lg sm:w-auto bg-[#0F9D8A] px-5 py-3 text-sm font-semibold text-white transition hover:bg-[#0C8575]"
           >
             Back to My Evaluations
           </Link>

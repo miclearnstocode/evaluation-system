@@ -228,8 +228,8 @@ export default function EvaluationForm({
 
     return (
       <div key={question.id} className="py-7 first:pt-0 last:pb-0">
-        <div className="mb-4 flex items-start justify-between gap-3">
-          <h3 className="text-[15px] font-semibold leading-6 text-slate-900">
+        <div className="mb-4 flex flex-wrap items-start justify-between gap-2">
+          <h3 className="min-w-0 wrap-anywhere text-[15px] font-semibold leading-6 text-slate-900">
             {question.question_text}
             {question.required ? (
               <span className="ml-1 text-red-600" aria-label="required">*</span>
@@ -252,8 +252,7 @@ export default function EvaluationForm({
           return (
             <div className="max-w-xl">
               <div
-                className="grid gap-2"
-                style={{ gridTemplateColumns: `repeat(${values.length}, minmax(0, 1fr))` }}
+                className="grid grid-cols-[repeat(auto-fit,minmax(min(100%,2.75rem),1fr))] gap-1.5 sm:gap-2"
                 role="radiogroup"
                 aria-label={question.question_text}
                 aria-describedby={scaleLabelsId}
@@ -274,7 +273,7 @@ export default function EvaluationForm({
                       <span
                         className={`flex h-14 items-center justify-center rounded-xl border text-base font-semibold transition ${FOCUS_RING} ${
                           isSelected
-                            ? "scale-105 border-[#0F9D8A] bg-linear-to-b from-[#12AC97] to-[#0F9D8A] text-white shadow-md shadow-teal-600/25"
+                            ? "border-[#0F9D8A] bg-linear-to-b from-[#12AC97] to-[#0F9D8A] text-white shadow-md shadow-teal-600/25"
                             : "border-slate-300 bg-white text-slate-700 hover:border-teal-500 hover:bg-teal-50"
                         }`}
                       >
@@ -284,7 +283,7 @@ export default function EvaluationForm({
                   );
                 })}
               </div>
-              <div id={scaleLabelsId} className="mt-2.5 flex justify-between gap-4 text-xs text-slate-600">
+              <div id={scaleLabelsId} className="mt-2.5 grid grid-cols-2 gap-3 wrap-anywhere text-xs text-slate-600">
                 <div>
                   <p className="font-semibold">{values[0]} — Lowest rating</p>
                   {question.min_label && <p>{question.min_label}</p>}
@@ -321,7 +320,7 @@ export default function EvaluationForm({
                   >
                     {isSelected && <span className="h-2 w-2 rounded-full bg-white" />}
                   </span>
-                  <span className="flex-1">{option.label}</span>
+                  <span className="min-w-0 flex-1 wrap-anywhere">{option.label}</span>
                 </label>
               );
             })}
@@ -348,7 +347,7 @@ export default function EvaluationForm({
                   >
                     {isSelected && <CheckIcon className="h-3 w-3" />}
                   </span>
-                  <span className="flex-1">{option.label}</span>
+                  <span className="min-w-0 flex-1 wrap-anywhere">{option.label}</span>
                 </label>
               );
             })}
@@ -356,11 +355,11 @@ export default function EvaluationForm({
         )}
 
         {question.type === "yes_no" && (
-          <div className="flex gap-3" role="radiogroup" aria-label={question.question_text}>
+          <div className="grid grid-cols-2 gap-2 sm:flex sm:gap-3" role="radiogroup" aria-label={question.question_text}>
             {[{ label: "Yes", value: true }, { label: "No", value: false }].map((choice) => {
               const isSelected = current === choice.value;
               return (
-                <label key={choice.label} className="cursor-pointer flex-1 sm:flex-none">
+                <label key={choice.label} className="cursor-pointer min-w-0">
                   <input
                     className="peer sr-only"
                     type="radio"
@@ -370,7 +369,7 @@ export default function EvaluationForm({
                     required={question.required}
                   />
                   <span
-                    className={`flex min-w-28 items-center justify-center gap-1.5 rounded-xl border px-6 py-3 text-sm font-semibold transition ${FOCUS_RING} ${
+                    className={`flex min-h-11 items-center justify-center gap-1.5 rounded-xl border px-3 py-3 sm:min-w-28 sm:px-6 text-sm font-semibold transition ${FOCUS_RING} ${
                       isSelected
                         ? "border-[#0F9D8A] bg-linear-to-b from-[#12AC97] to-[#0F9D8A] text-white shadow-md shadow-teal-600/25"
                         : "border-slate-300 bg-white text-slate-700 hover:border-teal-500 hover:bg-teal-50"
@@ -401,7 +400,7 @@ export default function EvaluationForm({
                 onChange={(event) => setAnswer(question.id, event.target.value)}
                 required={question.required}
                 placeholder="Share additional feedback…"
-                className="w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm text-slate-800 outline-none transition placeholder:text-slate-400 focus:border-teal-600 focus:ring-4 focus:ring-teal-600/10"
+                className="w-full rounded-xl border border-slate-300 bg-white px-4 pt-3 pb-8 text-base text-slate-800 outline-none sm:text-sm transition placeholder:text-slate-400 focus:border-teal-600 focus:ring-4 focus:ring-teal-600/10"
               />
               <span className="pointer-events-none absolute bottom-2.5 right-3 rounded-md bg-white/90 px-1.5 py-0.5 text-xs font-medium text-slate-400">
                 {(typeof current === "string" ? current.length : 0).toLocaleString()} / 5,000
@@ -416,7 +415,7 @@ export default function EvaluationForm({
   return (
     <div className="min-h-screen bg-linear-to-br from-slate-50 via-white to-teal-50/40 text-slate-900">
       <EvaluatorHeader currentPage="form" />
-      <main className="mx-auto max-w-3xl space-y-6 px-5 py-8 sm:py-10">
+      <main className="mx-auto max-w-3xl space-y-5 px-3 py-5 sm:space-y-6 sm:px-5 sm:py-10">
         {loading ? (
           <div role="status" aria-label="Loading evaluation" className="animate-pulse space-y-4">
             <div className="h-44 rounded-3xl border border-slate-200 bg-white shadow-sm" />
@@ -536,7 +535,7 @@ export default function EvaluationForm({
 
             {/* Hero */}
             <section className="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-lg shadow-slate-200/50">
-              <div className="relative overflow-hidden bg-linear-to-br from-[#1F3A5F] via-[#1a4a5f] to-[#0F9D8A] px-6 py-7 text-white sm:px-8 sm:py-8">
+              <div className="relative overflow-hidden bg-linear-to-br from-[#1F3A5F] via-[#1a4a5f] to-[#0F9D8A] px-4 py-5 text-white sm:px-8 sm:py-8">
                 <div className="pointer-events-none absolute -right-16 -top-16 h-48 w-48 rounded-full bg-white/10 blur-2xl" aria-hidden="true" />
                 <div className="pointer-events-none absolute -bottom-20 -left-16 h-56 w-56 rounded-full bg-teal-300/20 blur-3xl" aria-hidden="true" />
                 <div className="relative">
@@ -544,7 +543,7 @@ export default function EvaluationForm({
                     <span className="h-1.5 w-1.5 rounded-full bg-teal-300" aria-hidden="true" />
                     {form.survey_title}
                   </span>
-                  <h1 className="mt-3 text-2xl font-bold tracking-tight sm:text-3xl">{form.target_name}</h1>
+                  <h1 className="mt-3 wrap-anywhere text-2xl font-bold tracking-tight sm:text-3xl">{form.target_name}</h1>
                   {form.office_head_name && (
                     <p className="mt-2 text-sm text-teal-50/90">
                       <span className="text-teal-200/80">Office head:</span>{" "}
@@ -553,7 +552,7 @@ export default function EvaluationForm({
                   )}
                 </div>
               </div>
-              <div className="p-6 sm:p-8">
+              <div className="p-4 sm:p-8">
                 {form.description && (
                   <p className="text-sm leading-6 text-slate-600">{form.description}</p>
                 )}
@@ -566,14 +565,14 @@ export default function EvaluationForm({
                     </svg>
                   </span>
                   <p className="text-sm leading-6 text-teal-950">
-                    Your account email is available to administrators for review. Your email is not shown alongside your answers.
+                    Your name, email address, and account ID are hidden in the Admin submission review.
                   </p>
                 </div>
               </div>
             </section>
 
             {/* Sticky progress */}
-            <div className="sticky top-0 z-10 -mx-5 border-b border-slate-200/70 bg-slate-50/85 px-5 py-3 backdrop-blur-md">
+            <div className="sticky top-0 z-10 -mx-3 border-b border-slate-200/70 bg-slate-50/85 px-3 py-3 sm:-mx-5 sm:px-5 backdrop-blur-md">
               <div className="flex items-center justify-between text-xs font-semibold">
                 <span className="inline-flex items-center gap-1.5 text-slate-600">
                   <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-3.5 w-3.5" aria-hidden="true">
@@ -608,7 +607,7 @@ export default function EvaluationForm({
             <form onSubmit={advanceOrSubmit} noValidate className="space-y-6">
               {currentSection && (
                 <section key={currentSection.id} className="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm" aria-labelledby="current-section-title">
-                  <header className="flex items-center gap-3 border-b border-slate-100 bg-slate-50/60 px-6 py-4 sm:px-8">
+                  <header className="flex items-center gap-3 border-b border-slate-100 bg-slate-50/60 px-4 py-4 sm:px-8">
                     <span aria-hidden="true" className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-linear-to-br from-[#1F3A5F] to-[#0F9D8A] text-sm font-bold text-white shadow-sm">
                       {sectionIndex + 1}
                     </span>
@@ -621,7 +620,7 @@ export default function EvaluationForm({
                       </h2>
                     </div>
                   </header>
-                  <div className="divide-y divide-slate-100 px-6 py-7 sm:px-8">
+                  <div className="divide-y divide-slate-100 px-4 py-5 sm:px-8 sm:py-7">
                     {currentSection.questions.map(renderQuestion)}
                   </div>
                 </section>
@@ -638,8 +637,8 @@ export default function EvaluationForm({
                 </div>
               )}
 
-              <nav aria-label="Evaluation sections" className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm sm:px-8">
-                <div className="flex flex-wrap items-center justify-between gap-3">
+              <nav aria-label="Evaluation sections" className="rounded-3xl border border-slate-200 bg-white p-4 shadow-sm sm:px-8">
+                <div className="grid gap-3 sm:flex sm:items-center sm:justify-between">
                   <button
                     type="button"
                     disabled={sectionIndex === 0 || submitting}

@@ -82,22 +82,25 @@ export default function MyEvaluationsPage() {
 
   // Close the list when clicking outside the combobox.
   useEffect(() => {
-    function handlePointerDown(event: MouseEvent) {
+    function handlePointerDown(event: PointerEvent) {
       if (comboboxRef.current && !comboboxRef.current.contains(event.target as Node)) {
         setOpen(false);
         setQuery("");
       }
     }
-    document.addEventListener("mousedown", handlePointerDown);
-    return () => document.removeEventListener("mousedown", handlePointerDown);
+    document.addEventListener("pointerdown", handlePointerDown);
+    return () => document.removeEventListener("pointerdown", handlePointerDown);
   }, []);
 
   // Keep the highlighted option visible while using the keyboard.
   useEffect(() => {
-    if (!open) return;
-    listRef.current
-      ?.querySelector<HTMLElement>(`[data-index="${activeIndex}"]`)
-      ?.scrollIntoView({ block: "nearest" });
+    const list = listRef.current;
+    const option = list?.querySelector<HTMLElement>(`[data-index="${activeIndex}"]`);
+    if (!open || !list || !option) return;
+    const viewport = list.getBoundingClientRect();
+    const row = option.getBoundingClientRect();
+    if (row.top < viewport.top) list.scrollTop += row.top - viewport.top;
+    else if (row.bottom > viewport.bottom) list.scrollTop += row.bottom - viewport.bottom;
   }, [activeIndex, open]);
 
   function chooseEvaluation(evaluation: Evaluation) {
@@ -164,12 +167,12 @@ export default function MyEvaluationsPage() {
     ? "Loading targets…"
     : open && selected
       ? labelOf(selected)
-      : "Search or select an evaluation target";
+      : "Search offices";
 
   return (
     <div className="min-h-screen bg-linear-to-br from-slate-50 via-white to-teal-50/40 text-slate-900">
       <EvaluatorHeader currentPage="evaluations" />
-      <main className="mx-auto max-w-6xl space-y-6 px-5 py-8 sm:py-10">
+      <main className="mx-auto max-w-6xl space-y-5 px-3 py-5 sm:space-y-6 sm:px-5 sm:py-10">
         {/* Page heading */}
         <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
           <div>
@@ -199,7 +202,7 @@ export default function MyEvaluationsPage() {
             </svg>
           </span>
           <p className="text-sm leading-6 text-teal-950">
-            Your account email is available to administrators for review. Your email is not shown alongside your answers.
+            Your name, email address, and account ID are hidden in the Admin submission review.
           </p>
         </div>
 
@@ -215,13 +218,13 @@ export default function MyEvaluationsPage() {
         )}
 
         <div
-          className={`grid gap-6 ${
+          className={`grid grid-cols-1 gap-5 sm:gap-6 ${
             !loading && submittedEvaluations.length > 0
               ? "lg:grid-cols-2"
               : ""
           }`}
         >
-          <section className="min-w-0 rounded-3xl border border-slate-200 bg-white p-6 shadow-lg shadow-slate-200/50 sm:p-8">
+          <section className="min-w-0 rounded-3xl border border-slate-200 bg-white p-4 shadow-lg shadow-slate-200/50 sm:p-8">
             <div className="flex items-start gap-3">
               <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-teal-50 text-teal-700 ring-1 ring-teal-600/20">
                 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-5 w-5" aria-hidden="true">
@@ -232,7 +235,7 @@ export default function MyEvaluationsPage() {
               <div>
                 <h2 className="text-lg font-semibold text-[#1F3A5F]">Choose a target to evaluate</h2>
                 <p className="mt-1 text-sm text-slate-500">
-                  Open the list and type to filter by target, head, campus, or cycle.
+                  Open the list or search by office, office head, or campus.
                 </p>
               </div>
             </div>
@@ -241,80 +244,82 @@ export default function MyEvaluationsPage() {
               Evaluation target
             </label>
             <div ref={comboboxRef} className="relative mt-1.5 max-w-2xl">
-              {/* Leading search icon */}
-              <span className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3.5 text-slate-400" aria-hidden="true">
-                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-5 w-5">
-                  <circle cx="11" cy="11" r="8" />
-                  <line x1="21" y1="21" x2="16.65" y2="16.65" />
-                </svg>
-              </span>
-              <input
-                ref={inputRef}
-                id="target-selection"
-                type="text"
-                role="combobox"
-                aria-expanded={open}
-                aria-controls={listboxId}
-                aria-autocomplete="list"
-                aria-activedescendant={activeOptionId}
-                autoComplete="off"
-                value={inputValue}
-                placeholder={placeholder}
-                disabled={loading}
-                onFocus={() => {
-                  setOpen(true);
-                  setActiveIndex(0);
-                }}
-                onClick={() => setOpen(true)}
-                onChange={(event) => {
-                  setQuery(event.target.value);
-                  setOpen(true);
-                  setActiveIndex(0);
-                }}
-                onKeyDown={handleKeyDown}
-                className="block w-full rounded-xl border border-slate-300 bg-white py-3 pl-11 pr-20 text-sm text-slate-800 outline-none transition placeholder:text-slate-400 focus:border-teal-600 focus:ring-4 focus:ring-teal-600/10 disabled:bg-slate-100"
-              />
-              <div className="absolute inset-y-0 right-0 flex items-center gap-1 pr-3">
-                {selected && !loading && (
+              <div className="relative">
+                {/* Leading search icon */}
+                <span className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3.5 text-slate-400" aria-hidden="true">
+                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-5 w-5">
+                    <circle cx="11" cy="11" r="8" />
+                    <line x1="21" y1="21" x2="16.65" y2="16.65" />
+                  </svg>
+                </span>
+                <input
+                  ref={inputRef}
+                  id="target-selection"
+                  type="text"
+                  role="combobox"
+                  aria-expanded={open}
+                  aria-controls={listboxId}
+                  aria-autocomplete="list"
+                  aria-activedescendant={activeOptionId}
+                  autoComplete="off"
+                  value={inputValue}
+                  placeholder={placeholder}
+                  disabled={loading}
+                  onFocus={() => {
+                    setOpen(true);
+                    setActiveIndex(0);
+                  }}
+                  onClick={() => setOpen(true)}
+                  onChange={(event) => {
+                    setQuery(event.target.value);
+                    setOpen(true);
+                    setActiveIndex(0);
+                  }}
+                  onKeyDown={handleKeyDown}
+                  className="block w-full rounded-xl border border-slate-300 bg-white min-h-12 py-3 pl-10 pr-24 text-base sm:pl-11 sm:text-sm text-slate-800 outline-none transition placeholder:text-slate-400 focus:border-teal-600 focus:ring-4 focus:ring-teal-600/10 disabled:bg-slate-100"
+                />
+                <div className="absolute inset-y-0 right-0 flex items-center pr-1">
+                  {selected && !loading && (
+                    <button
+                      type="button"
+                      aria-label="Clear selected target"
+                      onMouseDown={(event) => event.preventDefault()}
+                      onClick={clearSelection}
+                      className="flex size-11 items-center justify-center rounded-full text-slate-400 transition hover:bg-slate-100 hover:text-slate-600"
+                    >
+                      <svg aria-hidden="true" viewBox="0 0 20 20" fill="currentColor" className="h-4 w-4">
+                        <path d="M6.28 5.22a.75.75 0 0 0-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 1 0 1.06 1.06L10 11.06l3.72 3.72a.75.75 0 1 0 1.06-1.06L11.06 10l3.72-3.72a.75.75 0 0 0-1.06-1.06L10 8.94 6.28 5.22Z" />
+                      </svg>
+                    </button>
+                  )}
                   <button
                     type="button"
-                    aria-label="Clear selected target"
+                    tabIndex={-1}
+                    aria-label={open ? "Close target list" : "Open target list"}
+                    disabled={loading}
                     onMouseDown={(event) => event.preventDefault()}
-                    onClick={clearSelection}
-                    className="flex h-7 w-7 items-center justify-center rounded-full text-slate-400 transition hover:bg-slate-100 hover:text-slate-600"
+                    onClick={() => {
+                      if (open) {
+                        setOpen(false);
+                        setQuery("");
+                      } else {
+                        setOpen(true);
+                        setActiveIndex(0);
+                        inputRef.current?.focus();
+                      }
+                    }}
+                    className="flex size-11 items-center justify-center rounded-full text-slate-400 transition hover:bg-slate-100 hover:text-slate-600 disabled:opacity-50"
                   >
-                    <svg aria-hidden="true" viewBox="0 0 20 20" fill="currentColor" className="h-4 w-4">
-                      <path d="M6.28 5.22a.75.75 0 0 0-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 1 0 1.06 1.06L10 11.06l3.72 3.72a.75.75 0 1 0 1.06-1.06L11.06 10l3.72-3.72a.75.75 0 0 0-1.06-1.06L10 8.94 6.28 5.22Z" />
+                    <svg
+                      aria-hidden="true"
+                      viewBox="0 0 20 20"
+                      fill="currentColor"
+                      className={`h-4 w-4 transition-transform ${open ? "rotate-180" : ""}`}
+                    >
+                      <path fillRule="evenodd" d="M5.22 7.22a.75.75 0 0 1 1.06 0L10 10.94l3.72-3.72a.75.75 0 1 1 1.06 1.06l-4.25 4.25a.75.75 0 0 1-1.06 0L5.22 8.28a.75.75 0 0 1 0-1.06Z" clipRule="evenodd" />
                     </svg>
                   </button>
-                )}
-                <button
-                  type="button"
-                  tabIndex={-1}
-                  aria-label={open ? "Close target list" : "Open target list"}
-                  disabled={loading}
-                  onMouseDown={(event) => event.preventDefault()}
-                  onClick={() => {
-                    if (open) {
-                      setOpen(false);
-                      setQuery("");
-                    } else {
-                      setOpen(true);
-                      setActiveIndex(0);
-                      inputRef.current?.focus();
-                    }
-                  }}
-                  className="flex h-7 w-7 items-center justify-center rounded-full text-slate-400 transition hover:bg-slate-100 hover:text-slate-600 disabled:opacity-50"
-                >
-                  <svg
-                    aria-hidden="true"
-                    viewBox="0 0 20 20"
-                    fill="currentColor"
-                    className={`h-4 w-4 transition-transform ${open ? "rotate-180" : ""}`}
-                  >
-                    <path fillRule="evenodd" d="M5.22 7.22a.75.75 0 0 1 1.06 0L10 10.94l3.72-3.72a.75.75 0 1 1 1.06 1.06l-4.25 4.25a.75.75 0 0 1-1.06 0L5.22 8.28a.75.75 0 0 1 0-1.06Z" clipRule="evenodd" />
-                  </svg>
-                </button>
+                </div>
               </div>
 
               {open && !loading && (
@@ -323,7 +328,7 @@ export default function MyEvaluationsPage() {
                   id={listboxId}
                   role="listbox"
                   aria-label="Evaluation targets"
-                  className="absolute z-20 mt-2 max-h-80 w-full overflow-auto rounded-xl border border-slate-200 bg-white py-1.5 shadow-xl shadow-slate-200/70 ring-1 ring-black/5"
+                  className="mt-2 max-h-[min(20rem,40dvh)] w-full overflow-auto overscroll-contain sm:absolute sm:z-20 sm:max-h-80 rounded-xl border border-slate-200 bg-white py-1.5 shadow-xl shadow-slate-200/70 ring-1 ring-black/5"
                 >
                   {filteredEvaluations.length === 0 ? (
                     <li role="presentation" className="px-4 py-6 text-center text-sm text-slate-500">
@@ -346,15 +351,15 @@ export default function MyEvaluationsPage() {
                           onMouseDown={(event) => event.preventDefault()}
                           onMouseEnter={() => setActiveIndex(index)}
                           onClick={() => chooseEvaluation(evaluation)}
-                          className={`mx-1.5 flex cursor-pointer items-start justify-between gap-3 rounded-lg px-3 py-2.5 text-sm transition ${
+                          className={`mx-1.5 flex min-h-11 cursor-pointer flex-wrap items-start justify-between gap-x-3 gap-y-1 rounded-lg px-3 py-2.5 sm:flex-nowrap text-sm transition ${
                             isActive ? "bg-teal-50" : "hover:bg-slate-50"
                           }`}
                         >
                           <span className="min-w-0">
-                            <span className={`block truncate ${isSelected ? "font-semibold text-teal-900" : "font-medium text-slate-800"}`}>
+                            <span className={`block wrap-anywhere ${isSelected ? "font-semibold text-teal-900" : "font-medium text-slate-800"}`}>
                               {evaluation.target_name}
                             </span>
-                            <span className="mt-0.5 block truncate text-xs text-slate-500">
+                            <span className="mt-0.5 block wrap-anywhere text-xs text-slate-500">
                               {evaluation.office_head_name ? `${evaluation.office_head_name} · ` : ""}
                               {locationOf(evaluation)}
                             </span>
@@ -404,7 +409,7 @@ export default function MyEvaluationsPage() {
                           <circle cx="12" cy="7" r="4" />
                         </svg>
                       </span>
-                      <p className="truncate font-semibold text-slate-800">{selected.target_name}</p>
+                      <p className="min-w-0 wrap-anywhere font-semibold text-slate-800">{selected.target_name}</p>
                     </div>
                     {selected.office_head_name && (
                       <p className="mt-2 text-xs text-slate-600">{selected.office_head_name}</p>
@@ -450,7 +455,7 @@ export default function MyEvaluationsPage() {
                       type="button"
                       disabled={selected.cycle_id === null}
                       onClick={startSelectedEvaluation}
-                      className="group inline-flex shrink-0 items-center justify-center gap-2 rounded-xl bg-linear-to-r from-[#0F9D8A] to-[#0C8575] px-5 py-3 text-sm font-semibold text-white shadow-lg shadow-teal-600/20 transition hover:shadow-teal-600/30 disabled:cursor-not-allowed disabled:opacity-50 disabled:shadow-none"
+                      className="group inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-xl bg-linear-to-r sm:w-auto sm:shrink-0 from-[#0F9D8A] to-[#0C8575] px-5 py-3 text-sm font-semibold text-white shadow-lg shadow-teal-600/20 transition hover:shadow-teal-600/30 disabled:cursor-not-allowed disabled:opacity-50 disabled:shadow-none"
                     >
                       {selected.cycle_id === null ? "No open cycle" : "Start evaluation"}
                       {selected.cycle_id !== null && (
@@ -467,7 +472,7 @@ export default function MyEvaluationsPage() {
           </section>
 
           {!loading && submittedEvaluations.length > 0 && (
-            <section className="min-w-0 rounded-3xl border border-teal-100 bg-white p-6 shadow-sm sm:p-8">
+            <section className="min-w-0 rounded-3xl border border-teal-100 bg-white p-4 shadow-sm sm:p-8">
               <div className="flex items-start gap-3 border-b border-slate-100 pb-5">
                 <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-teal-50 text-teal-700 ring-1 ring-teal-600/20">
                   <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-5 w-5" aria-hidden="true">
@@ -490,7 +495,7 @@ export default function MyEvaluationsPage() {
                     className="flex flex-col justify-between rounded-2xl border border-slate-200 bg-slate-50/50 p-4 transition hover:border-teal-200 hover:bg-white hover:shadow-sm"
                   >
                     <div>
-                      <p className="font-semibold text-slate-800 line-clamp-1" title={evaluation.target_name}>
+                      <p className="wrap-anywhere font-semibold text-slate-800 sm:line-clamp-2" title={evaluation.target_name}>
                         {evaluation.target_name}
                       </p>
                       <p className="mt-1 text-xs text-slate-500">
@@ -505,7 +510,7 @@ export default function MyEvaluationsPage() {
                       <button
                         type="button"
                         onClick={() => viewSubmittedEvaluation(evaluation)}
-                        className="text-xs font-semibold text-[#0F9D8A] transition hover:text-[#0C8575] hover:underline"
+                        className="inline-flex min-h-11 items-center text-sm font-semibold text-[#0F9D8A] transition hover:text-[#0C8575] hover:underline"
                       >
                         View Answers →
                       </button>

@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import Image from "next/image";
+import AuthBuilding from "../components/auth-building";
 import { FormEvent, useEffect, useState } from "react";
 import { apiFetch } from "../lib/api";
 import type { TargetType } from "../lib/targets";
@@ -228,9 +229,10 @@ export default function RegisterPage() {
   }
 
   return (
-    <main className="min-h-screen bg-linear-to-br from-slate-50 via-white to-teal-50/40 text-slate-900">
+    <main className="relative isolate flex h-dvh flex-col overflow-hidden bg-linear-to-br from-slate-50 via-white to-teal-50/40 text-slate-900">
+      <AuthBuilding />
       {/* Header */}
-      <header className="sticky top-0 z-20 border-b border-slate-200/70 bg-white/80 backdrop-blur-md">
+      <header className="z-20 shrink-0 border-b border-slate-200/70 bg-white/80 backdrop-blur-md">
         <div className="mx-auto flex max-w-6xl items-center justify-between px-5 py-4">
           <Link href="/" className="flex items-center gap-3">
             <Image
@@ -257,15 +259,14 @@ export default function RegisterPage() {
         </div>
       </header>
 
-      <div className="mx-auto max-w-6xl px-5 py-8 sm:py-12">
-        <div className="grid gap-8 lg:grid-cols-[1fr_1.6fr] lg:items-start">
-          {/* Left: Intro panel */}
-          <aside className="lg:sticky lg:top-24">
-            <div className="overflow-hidden rounded-3xl bg-linear-to-br from-[#1F3A5F] via-[#1a4a5f] to-[#0F9D8A] p-7 text-white shadow-xl shadow-teal-900/20 sm:p-8">
+      <div className="mx-auto min-h-0 w-full max-w-6xl flex-1 overflow-y-auto overscroll-contain px-4 py-5 sm:px-6 lg:overflow-hidden lg:px-8">
+        <div className="grid gap-4 lg:h-full lg:grid-cols-[minmax(0,1fr)_minmax(0,1.6fr)] lg:grid-rows-[minmax(0,1fr)] lg:gap-5 xl:gap-7">
+          <aside className="min-w-0 lg:max-h-full lg:self-start lg:overflow-y-auto lg:overscroll-contain">
+            <div className="overflow-hidden rounded-3xl bg-linear-to-br from-[#1F3A5F] via-[#1a4a5f] to-[#0F9D8A] p-5 text-white shadow-xl shadow-teal-900/20 xl:p-7">
               <p className="text-xs font-semibold uppercase tracking-[0.18em] text-teal-200">
                 Evaluator registration
               </p>
-              <h1 className="mt-3 text-3xl font-bold tracking-tight sm:text-4xl">
+              <h1 className="mt-3 text-2xl font-bold tracking-tight xl:text-3xl">
                 Join the evaluation system
               </h1>
               <p className="mt-3 text-sm leading-6 text-teal-50/90">
@@ -273,7 +274,7 @@ export default function RegisterPage() {
                 to you. Create an account and start evaluating right away.
               </p>
 
-              <div className="mt-8 space-y-4">
+              <div className="mt-6 hidden space-y-4 lg:block">
                 {[
                   {
                     icon: (
@@ -318,8 +319,13 @@ export default function RegisterPage() {
             </div>
           </aside>
 
-          {/* Right: Form */}
-          <div className="min-w-0">
+
+          <div
+            role="region"
+            aria-label="Evaluator registration form"
+            tabIndex={0}
+            className="min-w-0 rounded-2xl focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-teal-700 lg:min-h-0 lg:overflow-y-auto lg:overscroll-contain lg:px-2 lg:pb-2 lg:[scrollbar-gutter:stable]"
+          >
             {registered ? (
               <div className="rounded-3xl border border-teal-200 bg-white p-8 text-center shadow-lg shadow-teal-900/5 sm:p-10">
                 <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-teal-50 text-teal-600 ring-8 ring-teal-50">

@@ -481,18 +481,22 @@ class AdminResultsTests(unittest.TestCase):
         self.assertIn("t.office_head_name", fetch_all.call_args.args[1])
         self.assertEqual(response.get_json(), {"cycles": [{**cycle, "target_ids": [9]}], "targets": [target]})
 
-    def test_submission_list_includes_evaluator_email_for_admin_review(self):
+    def test_admin_submissions_omits_evaluator_identity_and_submission_metadata(self):
         app = create_app({"SECRET_KEY": "test-secret", "TESTING": True})
         connection = ResultsConnection()
-        submissions = [
+        rows = [
             {
-                "submission_token": "123e4567-e89b-12d3-a456-426614174000",
+                "submitted": 1,
+                "mean_score": Decimal("22.43"),
+                "user_id": 7,
                 "submitted_at": "2026-11-23 09:00:00",
-                "evaluator_email": "evaluator@capsu.edu.ph",
-                "first_name": "Eval",
-                "last_name": "User",
-                "mean_score": None,
-            }
+                "evaluator_email": "evaluator@example.com",
+                "first_name": "Private",
+                "last_name": "Evaluator",
+                "full_name": "Private Evaluator",
+                "submission_token": "123e4567-e89b-12d3-a456-426614174000",
+            },
+            {"submitted": 0, "mean_score": None},
         ]
 
         @contextmanager
@@ -502,24 +506,25 @@ class AdminResultsTests(unittest.TestCase):
         with patch("backend.core._current_user", return_value={"id": 1, "role": "admin"}), patch(
             "backend.routes.admin.connection", fake_connection
         ), patch(
-            "backend.routes.admin.fetch_one",
-            return_value={"id": 3, "status": "open"},
+            "backend.routes.admin.fetch_one", return_value={"id": 3, "status": "open"}
         ), patch(
-            "backend.routes.admin._load_cycle_target",
-            return_value={"target_name": "Office Alpha"},
-        ), patch("backend.routes.admin.fetch_all", return_value=submissions), patch(
-            "backend.routes.admin._audit"
-        ):
+            "backend.routes.admin._load_cycle_target", return_value={"target_name": "Office Alpha"}
+        ), patch("backend.routes.admin.fetch_all", return_value=rows) as fetch_all:
             client = app.test_client()
             with client.session_transaction() as session:
                 session["user_id"] = 1
             response = client.get("/api/admin/submissions?cycle_id=3&target_id=9")
 
         self.assertEqual(response.status_code, 200)
-        body = response.get_json()
-        self.assertIsNone(body["office_mean"])
-        self.assertEqual(body["items"][0]["full_name"], "Eval User")
-        self.assertIsNone(body["items"][0]["mean_score"])
+        self.assertEqual(response.get_json(), {
+            "items": [{"submitted": True, "mean_score": 22.43}, {"submitted": False, "mean_score": None}],
+            "office_mean": 22.43,
+        })
+        query = fetch_all.call_args.args[1]
+        selected_columns = query.split("FROM users", 1)[0]
+        for private_field in ("email", "first_name", "last_name", "submitted_at", "user_id", "submission_token"):
+            self.assertNotIn(private_field, selected_columns)
+        self.assertNotIn("ORDER BY u.", query)
 
     def test_super_admin_submission_list_includes_each_evaluators_scores(self):
         app = create_app({"SECRET_KEY": "test-secret", "TESTING": True})
@@ -758,99 +763,99 @@ class AdminResultsTests(unittest.TestCase):
         self.assertEqual(response.status_code, 400)
         self.assertIn("Evaluator groups are no longer supported", response.get_json()["error"])
 
-    def test_submission_review_returns_content_without_identity_or_token(self):
-        app = create_app({"SECRET_KEY": "test-secret", "TESTING": True})
-        connection = ResultsConnection()
-        now = datetime.now(timezone.utc).replace(tzinfo=None)
-        token = "123e4567-e89b-12d3-a456-426614174000"
-
-        @contextmanager
-        def fake_connection(*args):
-            yield connection
-
-        with patch("backend.core._current_user", return_value={"id": 1, "role": "admin"}), patch(
-            "backend.routes.admin.connection", fake_connection
-        ), patch(
-            "backend.routes.admin.fetch_one",
-            side_effect=[
-                {"cycle_id": 3, "target_id": 9},
-                {
-                    "status": "open",
-                    "opens_at": now - timedelta(minutes=1),
-                    "closes_at": now + timedelta(minutes=1),
-                },
-            ],
-        ), patch(
-            "backend.routes.admin.fetch_all",
-            side_effect=[
-                [
-                    {
-                        "question_id": 12,
-                        "answer_value": b'"Please email evaluator@capsu.edu.ph"',
-                        "score": None,
-                        "prompt": "Additional comments",
-                        "question_type": "text",
-                    }
-                ],
-                [
-                    {
-                        "id": 44,
-                        "question_id": 12,
-                        "question": "Additional comments",
-                        "comment_text": "evaluator@capsu.edu.ph",
-                        "status": "pending",
-                    }
-                ],
-            ],
-        ) as fetch_all, patch("backend.routes.admin._audit"):
-            client = app.test_client()
-            with client.session_transaction() as session:
-                session["user_id"] = 1
-            response = client.post(
-                "/api/admin/submissions/review",
-                json={"submission_token": token},
-            )
-
-        self.assertEqual(response.status_code, 200)
-        body = response.get_json()
-        self.assertEqual(body["answers"][0]["answer"], "Please email [email redacted]")
-        self.assertEqual(body["comments"][0]["comment_text"], "[email redacted]")
-        self.assertNotIn(token, response.get_data(as_text=True))
-        self.assertNotIn("user_id", response.get_data(as_text=True))
-        self.assertTrue(all("participation" not in call.args[1] and "users" not in call.args[1] for call in fetch_all.call_args_list))
-
-    def test_submission_delete_retracts_counts_before_cascade_delete(self):
-        app = create_app({"SECRET_KEY": "test-secret", "TESTING": True})
-        connection = ResultsConnection()
-        token = "123e4567-e89b-12d3-a456-426614174000"
-
-        @contextmanager
-        def fake_connection(*args):
-            yield connection
-
-        with patch("backend.core._current_user", return_value={"id": 1, "role": "admin"}), patch(
-            "backend.routes.admin.connection", fake_connection
-        ), patch(
-            "backend.routes.admin.fetch_one",
-            return_value={"cycle_id": 3, "target_id": 9},
-        ), patch(
-            "backend.routes.admin.fetch_all",
-            return_value=[{"question_id": 12, "answer_value": b"4", "question_type": "scale"}],
-        ), patch("backend.routes.admin._audit"):
-            client = app.test_client()
-            with client.session_transaction() as session:
-                session["user_id"] = 1
-            response = client.delete(
-                "/api/admin/submissions",
-                json={"submission_token": token},
-            )
-
-        self.assertEqual(response.status_code, 200)
-        queries = [query for query, _ in connection.db_cursor.executed]
-        self.assertTrue(any("UPDATE answer_tallies SET cnt = cnt - 1" in query for query in queries))
-        self.assertTrue(any("UPDATE response_counts SET total_submissions" in query for query in queries))
-        self.assertTrue(any("DELETE FROM participation" in query for query in queries))
-
+    def test_submission_review_returns_content_without_identity_or_token(self):
+        app = create_app({"SECRET_KEY": "test-secret", "TESTING": True})
+        connection = ResultsConnection()
+        now = datetime.now(timezone.utc).replace(tzinfo=None)
+        token = "123e4567-e89b-12d3-a456-426614174000"
+
+        @contextmanager
+        def fake_connection(*args):
+            yield connection
+
+        with patch("backend.core._current_user", return_value={"id": 1, "role": "admin"}), patch(
+            "backend.routes.admin.connection", fake_connection
+        ), patch(
+            "backend.routes.admin.fetch_one",
+            side_effect=[
+                {"cycle_id": 3, "target_id": 9},
+                {
+                    "status": "open",
+                    "opens_at": now - timedelta(minutes=1),
+                    "closes_at": now + timedelta(minutes=1),
+                },
+            ],
+        ), patch(
+            "backend.routes.admin.fetch_all",
+            side_effect=[
+                [
+                    {
+                        "question_id": 12,
+                        "answer_value": b'"Please email evaluator@capsu.edu.ph"',
+                        "score": None,
+                        "prompt": "Additional comments",
+                        "question_type": "text",
+                    }
+                ],
+                [
+                    {
+                        "id": 44,
+                        "question_id": 12,
+                        "question": "Additional comments",
+                        "comment_text": "evaluator@capsu.edu.ph",
+                        "status": "pending",
+                    }
+                ],
+            ],
+        ) as fetch_all, patch("backend.routes.admin._audit"):
+            client = app.test_client()
+            with client.session_transaction() as session:
+                session["user_id"] = 1
+            response = client.post(
+                "/api/admin/submissions/review",
+                json={"submission_token": token},
+            )
+
+        self.assertEqual(response.status_code, 200)
+        body = response.get_json()
+        self.assertEqual(body["answers"][0]["answer"], "Please email [email redacted]")
+        self.assertEqual(body["comments"][0]["comment_text"], "[email redacted]")
+        self.assertNotIn(token, response.get_data(as_text=True))
+        self.assertNotIn("user_id", response.get_data(as_text=True))
+        self.assertTrue(all("participation" not in call.args[1] and "users" not in call.args[1] for call in fetch_all.call_args_list))
+
+    def test_submission_delete_retracts_counts_before_cascade_delete(self):
+        app = create_app({"SECRET_KEY": "test-secret", "TESTING": True})
+        connection = ResultsConnection()
+        token = "123e4567-e89b-12d3-a456-426614174000"
+
+        @contextmanager
+        def fake_connection(*args):
+            yield connection
+
+        with patch("backend.core._current_user", return_value={"id": 1, "role": "admin"}), patch(
+            "backend.routes.admin.connection", fake_connection
+        ), patch(
+            "backend.routes.admin.fetch_one",
+            return_value={"cycle_id": 3, "target_id": 9},
+        ), patch(
+            "backend.routes.admin.fetch_all",
+            return_value=[{"question_id": 12, "answer_value": b"4", "question_type": "scale"}],
+        ), patch("backend.routes.admin._audit"):
+            client = app.test_client()
+            with client.session_transaction() as session:
+                session["user_id"] = 1
+            response = client.delete(
+                "/api/admin/submissions",
+                json={"submission_token": token},
+            )
+
+        self.assertEqual(response.status_code, 200)
+        queries = [query for query, _ in connection.db_cursor.executed]
+        self.assertTrue(any("UPDATE answer_tallies SET cnt = cnt - 1" in query for query in queries))
+        self.assertTrue(any("UPDATE response_counts SET total_submissions" in query for query in queries))
+        self.assertTrue(any("DELETE FROM participation" in query for query in queries))
+
     def test_open_cycle_comments_are_visible_as_they_arrive(self):
         app = create_app({"SECRET_KEY": "test-secret", "TESTING": True})
         connection = ResultsConnection()

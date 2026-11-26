@@ -92,6 +92,7 @@ function CatalogHeader({
 export default function CatalogPage({ kind }: { kind: CatalogKind }) {
   const { title, path, description } = config[kind];
   const [items, setItems] = useState<CatalogRow[]>([]);
+  const [targetSearch, setTargetSearch] = useState("");
   const [options, setOptions] = useState<NamedOption[]>([]);
   const [form, setForm] = useState<Record<string, string>>({});
   const [error, setError] = useState("");
@@ -312,6 +313,14 @@ export default function CatalogPage({ kind }: { kind: CatalogKind }) {
     const directoryTitle = isCampusCatalog ? "Campus directory" : "Target directory";
     const addLabel = isCampusCatalog ? "Add campus" : "Add target";
     const recordsLabel = isCampusCatalog ? "campuses" : "targets";
+    const search = isCampusCatalog ? "" : targetSearch.trim().toLowerCase();
+    const searchTerms = search ? search.split(/\s+/) : [];
+    const visibleItems = searchTerms.length ? items.filter(item => {
+      const location = item.campus_name ?? (item.is_central ? "Central" : "University-wide");
+      const category = item.target_type ? TARGET_TYPE_LABELS[item.target_type] : "";
+      const text = [item.name, item.code, category, location].join(" ").toLowerCase();
+      return searchTerms.every(term => text.includes(term));
+    }) : items;
 
     return (
       <div className="mx-auto max-w-7xl space-y-7">
@@ -334,6 +343,23 @@ export default function CatalogPage({ kind }: { kind: CatalogKind }) {
             <h2 id="catalog-directory-title" className="text-xl font-bold tracking-tight text-[#1F3A5F]">
               {directoryTitle}
             </h2>
+            {!isCampusCatalog && (
+              <div className="mt-3">
+                <input
+                  aria-label="Search evaluation targets"
+                  type="search"
+                  value={targetSearch}
+                  onChange={(event) => setTargetSearch(event.target.value)}
+                  placeholder="Search by office, code, category, or campus"
+                  className="w-full max-w-md rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-sm text-slate-900 placeholder:text-slate-500 focus-visible:outline-2 focus-visible:outline-teal-700"
+                />
+                {search && !loading && items.length > 0 && (
+                  <p role="status" className="mt-2 text-sm text-slate-600">
+                    {visibleItems.length} of {items.length} targets
+                  </p>
+                )}
+              </div>
+            )}
             {loading ? (
               <p role="status" className="mt-4 rounded-2xl border border-slate-200 bg-white p-5 text-sm text-slate-600">
                 Loading {recordsLabel}…
@@ -342,9 +368,13 @@ export default function CatalogPage({ kind }: { kind: CatalogKind }) {
               <p className="mt-4 rounded-2xl border border-dashed border-slate-300 bg-white p-6 text-sm text-slate-600">
                 {error ? "Records are unavailable." : `No ${recordsLabel} have been added.`}
               </p>
+            ) : visibleItems.length === 0 ? (
+              <p className="mt-4 rounded-2xl border border-dashed border-slate-300 bg-white p-6 text-sm text-slate-600">
+                No offices match your search.
+              </p>
             ) : (
               <ul className="mt-4 grid gap-4 sm:grid-cols-2">
-                {items.map((item) => (
+                {visibleItems.map((item) => (
                   <li key={item.id} className="flex min-w-0 flex-col rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
                     <div className="flex flex-wrap items-center justify-between gap-2">
                       {item.code && (

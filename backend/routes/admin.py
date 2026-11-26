@@ -1080,36 +1080,30 @@ def list_submissions():
         if not _load_cycle_target(cursor, cycle_id, target_id):
             raise ApiError("Target not found in this cycle.", 404)
             
-        items = fetch_all(
+        rows = fetch_all(
             cursor,
-            "SELECT u.id AS user_id, u.first_name, u.last_name, u.email AS evaluator_email, "
-            "p.submission_token, p.submitted_at, ers.mean_score "
+            "SELECT p.id IS NOT NULL AS submitted, ers.mean_score "
             "FROM users u "
             "LEFT JOIN participation p ON p.user_id = u.id AND p.cycle_id = %s AND p.target_id = %s "
             "LEFT JOIN evaluator_response_scores ers ON ers.score_link_token = p.submission_token "
             "WHERE u.role = 'evaluator' AND u.active = 1 "
-            "ORDER BY u.first_name, u.last_name",
+            "ORDER BY p.id IS NULL, ers.mean_score DESC",
             (cycle_id, target_id),
         )
-        for item in items:
-            item["full_name"] = " ".join(
-                part for part in (item.get("first_name"), item.get("last_name")) if part
-            ) or item.get("evaluator_email")
-        
-        valid_scores = []
-        for item in items:
-            if item["mean_score"] is not None:
-                item["mean_score"] = float(item["mean_score"])
-                valid_scores.append(Decimal(str(item["mean_score"])))
-            if item["submitted_at"] is not None:
-                item["submitted_at"] = str(item["submitted_at"])
-
-        office_mean = _average_scores(valid_scores) if valid_scores else None
-
+        items = [
+            {
+                "submitted": bool(row["submitted"]),
+                "mean_score": float(row["mean_score"]) if row["mean_score"] is not None else None,
+            }
+            for row in rows
+        ]
+        office_mean = _average_scores(
+            [Decimal(str(row["mean_score"])) for row in rows if row["mean_score"] is not None]
+        )
         _audit(cursor, actor, "view", "submission_list", f"{cycle_id}:{target_id}")
         conn.commit()
         cursor.close()
-        
+
     return jsonify(items=items, office_mean=office_mean)
 
 
@@ -1189,112 +1183,112 @@ def super_admin_office_comments():
     return jsonify(items=items)
 
 
-@bp.post("/api/admin/submissions/review")
-@require_role("admin")
-def review_submission():
-    payload = _json_body()
-    try:
-        submission_token = str(uuid.UUID(payload.get("submission_token", "")))
-    except (AttributeError, TypeError, ValueError):
-        raise ApiError("Submission not found.", 404) from None
-    actor = request_user()
-    with connection() as conn:
-        cursor = conn.cursor(dictionary=True)
-        submission = fetch_one(
-            cursor,
-            "SELECT cycle_id, target_id FROM participation WHERE submission_token = %s",
-            (submission_token,),
-        )
-        if not submission:
-            raise ApiError("Submission not found.", 404)
-        cycle = fetch_one(
-            cursor,
-            "SELECT status, opens_at, closes_at FROM eval_cycles WHERE id = %s",
-            (submission["cycle_id"],),
-        )
-        if not cycle or not (_cycle_is_open(cycle) or _cycle_is_closed(cycle)):
-            raise ApiError("Submissions can be reviewed only while a cycle is open or after it closes.", 409)
-        answers = fetch_all(
-            cursor,
-            "SELECT ea.question_id, ea.answer_value, ea.score, q.prompt, q.question_type "
-            "FROM evaluator_answers ea JOIN questions q ON q.id = ea.question_id "
-            "WHERE ea.submission_token = %s ORDER BY q.sort_order, q.id",
-            (submission_token,),
-        )
-        for answer in answers:
-            value = answer["answer_value"]
-            if isinstance(value, (str, bytes, bytearray)):
-                value = json.loads(value)
-            if answer["question_type"] == "single_choice":
-                option = fetch_one(
-                    cursor,
-                    "SELECT option_text FROM question_options WHERE id = %s",
-                    (value,),
-                )
-                value = option["option_text"] if option else str(value)
-            elif answer["question_type"] == "multi_choice" and value:
-                placeholders = ", ".join(["%s"] * len(value))
-                options = fetch_all(
-                    cursor,
-                    f"SELECT id, option_text FROM question_options WHERE id IN ({placeholders})",
-                    tuple(value),
-                )
-                labels = {option["id"]: option["option_text"] for option in options}
-                value = [labels.get(option_id, str(option_id)) for option_id in value]
-            elif answer["question_type"] == "yes_no":
-                value = "Yes" if value else "No"
-            elif answer["question_type"] == "text":
-                value = _redact_email_addresses(value)
-            answer["answer"] = value
-            answer["score"] = float(answer["score"]) if answer["score"] is not None else None
-            del answer["answer_value"]
-        comments = fetch_all(
-            cursor,
-            "SELECT cm.id, cm.question_id, q.prompt AS question, cm.comment_text, cm.status "
-            "FROM comments cm JOIN questions q ON q.id = cm.question_id "
-            "WHERE cm.submission_token = %s ORDER BY q.sort_order, q.id",
-            (submission_token,),
-        )
-        for comment in comments:
-            comment["comment_text"] = _redact_email_addresses(comment["comment_text"])
-        _audit(cursor, actor, "view", "submission_review", f"{submission['cycle_id']}:{submission['target_id']}")
-        conn.commit()
-        cursor.close()
-    return jsonify(answers=answers, comments=comments)
-
-
-@bp.delete("/api/admin/submissions")
-@require_role("admin")
-def delete_submission():
-    payload = _json_body()
-    try:
-        submission_token = str(uuid.UUID(payload.get("submission_token", "")))
-    except (AttributeError, TypeError, ValueError):
-        raise ApiError("Submission not found.", 404) from None
-    actor = request_user()
-    with connection() as conn:
-        cursor = conn.cursor(dictionary=True)
-        conn.start_transaction()
-        try:
-            submission = fetch_one(
-                cursor,
-                "SELECT cycle_id, target_id FROM participation "
-                "WHERE submission_token = %s FOR UPDATE",
-                (submission_token,),
-            )
-            if not submission:
-                raise ApiError("Submission not found.", 404)
-            _retract_submission(cursor, submission_token)
-            _audit(cursor, actor, "delete", "submission", f"{submission['cycle_id']}:{submission['target_id']}")
-            conn.commit()
-        except Exception:
-            conn.rollback()
-            raise
-        finally:
-            cursor.close()
-    return jsonify(status="deleted")
-
-
+@bp.post("/api/admin/submissions/review")
+@require_role("admin")
+def review_submission():
+    payload = _json_body()
+    try:
+        submission_token = str(uuid.UUID(payload.get("submission_token", "")))
+    except (AttributeError, TypeError, ValueError):
+        raise ApiError("Submission not found.", 404) from None
+    actor = request_user()
+    with connection() as conn:
+        cursor = conn.cursor(dictionary=True)
+        submission = fetch_one(
+            cursor,
+            "SELECT cycle_id, target_id FROM participation WHERE submission_token = %s",
+            (submission_token,),
+        )
+        if not submission:
+            raise ApiError("Submission not found.", 404)
+        cycle = fetch_one(
+            cursor,
+            "SELECT status, opens_at, closes_at FROM eval_cycles WHERE id = %s",
+            (submission["cycle_id"],),
+        )
+        if not cycle or not (_cycle_is_open(cycle) or _cycle_is_closed(cycle)):
+            raise ApiError("Submissions can be reviewed only while a cycle is open or after it closes.", 409)
+        answers = fetch_all(
+            cursor,
+            "SELECT ea.question_id, ea.answer_value, ea.score, q.prompt, q.question_type "
+            "FROM evaluator_answers ea JOIN questions q ON q.id = ea.question_id "
+            "WHERE ea.submission_token = %s ORDER BY q.sort_order, q.id",
+            (submission_token,),
+        )
+        for answer in answers:
+            value = answer["answer_value"]
+            if isinstance(value, (str, bytes, bytearray)):
+                value = json.loads(value)
+            if answer["question_type"] == "single_choice":
+                option = fetch_one(
+                    cursor,
+                    "SELECT option_text FROM question_options WHERE id = %s",
+                    (value,),
+                )
+                value = option["option_text"] if option else str(value)
+            elif answer["question_type"] == "multi_choice" and value:
+                placeholders = ", ".join(["%s"] * len(value))
+                options = fetch_all(
+                    cursor,
+                    f"SELECT id, option_text FROM question_options WHERE id IN ({placeholders})",
+                    tuple(value),
+                )
+                labels = {option["id"]: option["option_text"] for option in options}
+                value = [labels.get(option_id, str(option_id)) for option_id in value]
+            elif answer["question_type"] == "yes_no":
+                value = "Yes" if value else "No"
+            elif answer["question_type"] == "text":
+                value = _redact_email_addresses(value)
+            answer["answer"] = value
+            answer["score"] = float(answer["score"]) if answer["score"] is not None else None
+            del answer["answer_value"]
+        comments = fetch_all(
+            cursor,
+            "SELECT cm.id, cm.question_id, q.prompt AS question, cm.comment_text, cm.status "
+            "FROM comments cm JOIN questions q ON q.id = cm.question_id "
+            "WHERE cm.submission_token = %s ORDER BY q.sort_order, q.id",
+            (submission_token,),
+        )
+        for comment in comments:
+            comment["comment_text"] = _redact_email_addresses(comment["comment_text"])
+        _audit(cursor, actor, "view", "submission_review", f"{submission['cycle_id']}:{submission['target_id']}")
+        conn.commit()
+        cursor.close()
+    return jsonify(answers=answers, comments=comments)
+
+
+@bp.delete("/api/admin/submissions")
+@require_role("admin")
+def delete_submission():
+    payload = _json_body()
+    try:
+        submission_token = str(uuid.UUID(payload.get("submission_token", "")))
+    except (AttributeError, TypeError, ValueError):
+        raise ApiError("Submission not found.", 404) from None
+    actor = request_user()
+    with connection() as conn:
+        cursor = conn.cursor(dictionary=True)
+        conn.start_transaction()
+        try:
+            submission = fetch_one(
+                cursor,
+                "SELECT cycle_id, target_id FROM participation "
+                "WHERE submission_token = %s FOR UPDATE",
+                (submission_token,),
+            )
+            if not submission:
+                raise ApiError("Submission not found.", 404)
+            _retract_submission(cursor, submission_token)
+            _audit(cursor, actor, "delete", "submission", f"{submission['cycle_id']}:{submission['target_id']}")
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            cursor.close()
+    return jsonify(status="deleted")
+
+
 @bp.get("/api/admin/results/options")
 @require_role("super_admin")
 def results_options():

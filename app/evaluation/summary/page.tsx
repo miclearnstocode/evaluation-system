@@ -122,14 +122,14 @@ function EvaluationSummaryContent() {
 
   return (
     <div className="min-h-screen bg-linear-to-br from-slate-50 via-white to-teal-50/40 text-slate-900">
-      <EvaluatorHeader currentPage="evaluations" />
-      <main className="mx-auto max-w-4xl space-y-6 px-5 pt-8 pb-28 sm:pt-10">
+      <EvaluatorHeader currentPage="summary" />
+      <main className="mx-auto max-w-4xl space-y-5 px-3 pt-5 pb-28 sm:space-y-6 sm:px-5 sm:pt-10">
         <div>
           <p className="text-sm font-semibold uppercase tracking-wide text-teal-800">My submission</p>
           <h1 className="mt-2 text-3xl font-bold tracking-tight text-[#1F3A5F]">Your submitted answers</h1>
           {visibleSummary && (
             <div className="mt-3 space-y-1 text-sm text-slate-600">
-              <p className="font-semibold text-slate-800">{visibleSummary.target_name}</p>
+              <p className="wrap-anywhere font-semibold text-slate-800">{visibleSummary.target_name}</p>
               <p>
                 {getTargetLocationLabel(visibleSummary.campus_name, Boolean(visibleSummary.is_central))}
                 {" · "}
@@ -215,7 +215,7 @@ function EvaluationSummaryContent() {
                       ))}
                     </ul>
                   ) : (
-                    <p className="mt-2 whitespace-pre-wrap rounded-lg bg-slate-50 px-3 py-2 text-sm leading-6 text-slate-900">
+                    <p className="mt-2 whitespace-pre-wrap wrap-anywhere rounded-lg bg-slate-50 px-3 py-2 text-sm leading-6 text-slate-900">
                       {String(answer.answer)}
                     </p>
                   )}
@@ -223,12 +223,12 @@ function EvaluationSummaryContent() {
               ))}
             </div>
             {sectionCount > 1 && (
-              <nav aria-label="Summary sections" className="flex justify-between gap-3 border-t border-slate-100 px-5 py-4 sm:px-6">
+              <nav aria-label="Summary sections" className="grid grid-cols-2 gap-2 border-t border-slate-100 px-3 py-4 sm:flex sm:justify-between sm:gap-3 sm:px-6">
                 <button
                   type="button"
                   disabled={sectionIndex === 0}
                   onClick={() => goToSection(sectionIndex - 1)}
-                  className="rounded-xl border border-slate-300 px-4 py-2.5 text-sm font-semibold text-slate-700 hover:border-teal-600 hover:text-teal-800 disabled:cursor-not-allowed disabled:opacity-50"
+                  className="rounded-xl border border-slate-300 min-h-11 px-2 py-2.5 text-sm font-semibold sm:px-4 text-slate-700 hover:border-teal-600 hover:text-teal-800 disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   Previous section
                 </button>
@@ -236,7 +236,7 @@ function EvaluationSummaryContent() {
                   type="button"
                   disabled={sectionIndex + 1 >= sectionCount}
                   onClick={() => goToSection(sectionIndex + 1)}
-                  className="rounded-xl bg-teal-700 px-4 py-2.5 text-sm font-semibold text-white hover:bg-teal-800 disabled:cursor-not-allowed disabled:opacity-50"
+                  className="rounded-xl bg-teal-700 min-h-11 px-2 py-2.5 text-sm font-semibold sm:px-4 text-white hover:bg-teal-800 disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   Next section
                 </button>
@@ -247,7 +247,7 @@ function EvaluationSummaryContent() {
       </main>
       <Link
         href="/evaluation/"
-        className={`fixed right-5 bottom-5 z-20 inline-flex items-center gap-2 rounded-full bg-[#1F3A5F] px-4 py-3 text-sm font-semibold text-white shadow-lg transition-[opacity,transform] duration-150 hover:bg-teal-800 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-teal-600 motion-reduce:transition-none sm:bottom-8 lg:right-[max(1.25rem,calc(50%_-_26.75rem))] ${
+        className={`fixed right-3 bottom-[max(1rem,env(safe-area-inset-bottom))] z-20 sm:right-5 inline-flex items-center gap-2 rounded-full bg-[#1F3A5F] px-4 py-3 text-sm font-semibold text-white shadow-lg transition-[opacity,transform] duration-150 hover:bg-teal-800 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-teal-600 motion-reduce:transition-none sm:bottom-8 lg:right-[max(1.25rem,calc(50%_-_26.75rem))] ${
           isScrolling
             ? "pointer-events-none translate-y-2 opacity-0 focus-visible:pointer-events-auto focus-visible:translate-y-0 focus-visible:opacity-100"
             : "translate-y-0 opacity-100"

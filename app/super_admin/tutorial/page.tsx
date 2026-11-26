@@ -1,6 +1,6 @@
 import Link from "next/link";
 import ReviewPageHeader from "../../components/review-page-header";
-import { StartWalkthroughButton } from "../super-admin-walkthrough";
+import { StartWalkthroughButton } from "../../components/walkthrough";
 
 const workflow = [
   {

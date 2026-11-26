@@ -16,15 +16,11 @@ type Target = {
 };
 type EvaluatorData = {
   evaluator_number?: number;
-  user_id?: number;
-  first_name?: string | null;
-  last_name?: string | null;
-  evaluator_email?: string;
-  submitted?: boolean;
-  submission_token?: string | null;
+  submitted: boolean;
   total_score?: number | string | null;
-  mean_score: number | string | null;
+  mean_score?: number | string | null;
 };
+type SubmissionData = { items: EvaluatorData[]; office_mean: number | null };
 type RosterEntry = { evaluator: EvaluatorData; id: number; name: string; marker: string };
 
 function targetSubtitle(target: Target, isSuperAdmin: boolean) {
@@ -33,23 +29,10 @@ function targetSubtitle(target: Target, isSuperAdmin: boolean) {
     : getTargetLocationLabel(target.campus_name, Boolean(target.is_central));
 }
 
-function hasSubmission(evaluator: EvaluatorData) {
-  return evaluator.submitted ?? Boolean(evaluator.submission_token);
-}
-
 function getAvatarColor(name: string) {
   const colors = ["bg-blue-100 text-blue-600", "bg-teal-100 text-teal-600", "bg-indigo-100 text-indigo-600", "bg-purple-100 text-purple-600"];
   const charCode = name.charCodeAt(0) || 0;
   return colors[charCode % colors.length];
-}
-
-function evaluatorName(evaluator: EvaluatorData) {
-  return [evaluator.first_name, evaluator.last_name].filter(Boolean).join(" ").trim() || evaluator.evaluator_email || "Evaluator";
-}
-
-function evaluatorInitials(evaluator: EvaluatorData) {
-  return `${evaluator.first_name?.trim()[0] ?? ""}${evaluator.last_name?.trim()[0] ?? ""}`
-    || evaluatorName(evaluator)[0];
 }
 
 function scoreLabel(score: number | string | null | undefined) {
@@ -117,7 +100,7 @@ function EvaluatorDiagram({
           </text>
         </g>
         {nodes.map(({ evaluator, id, name, marker, x, y }) => {
-          const submitted = hasSubmission(evaluator);
+          const submitted = evaluator.submitted;
           const label = `${name} · ${submitted ? "Submitted" : "Pending"}`;
           return (
             <a key={id} href={`#review-evaluator-${id}`} aria-label={label} className="group">
@@ -153,7 +136,6 @@ export function SubmissionsOverview({ audience = "admin" }: { audience?: "admin"
   
   const [loadedSubmissionKey, setLoadedSubmissionKey] = useState("");
   const [loadingOptions, setLoadingOptions] = useState(true);
-  const [deletingToken, setDeletingToken] = useState("");
   const [error, setError] = useState("");
   useEffect(() => {
     let active = true;
@@ -195,13 +177,12 @@ export function SubmissionsOverview({ audience = "admin" }: { audience?: "admin"
   useEffect(() => {
     if (!cycleId || !targetId) return;
     let active = true;
-    apiFetch<{ items: EvaluatorData[]; office_mean: number | null }>(
+    apiFetch<SubmissionData>(
       `${isSuperAdmin ? "/api/admin/super-admin/submissions" : "/api/admin/submissions"}?cycle_id=${encodeURIComponent(cycleId)}&target_id=${encodeURIComponent(targetId)}`,
     )
       .then((data) => {
         if (active) {
-          const sorted = [...data.items].sort((a, b) => Number(hasSubmission(b)) - Number(hasSubmission(a)));
-          setEvaluators(sorted);
+          setEvaluators([...data.items].sort((a, b) => Number(b.submitted) - Number(a.submitted)));
           setOfficeMean(data.office_mean);
         }
       })
@@ -217,49 +198,13 @@ export function SubmissionsOverview({ audience = "admin" }: { audience?: "admin"
     setLoadedSubmissionKey("");
   }
 
-  async function removeSubmission(evaluator: EvaluatorData) {
-    if (isSuperAdmin || deletingToken || !evaluator.submission_token) return;
-    if (!window.confirm(`Remove the evaluation submitted by ${evaluatorName(evaluator)}?`)) return;
-
-    setError("");
-    setDeletingToken(evaluator.submission_token);
-    try {
-      await apiFetch("/api/admin/submissions", {
-        method: "DELETE",
-        body: JSON.stringify({ submission_token: evaluator.submission_token }),
-      });
-      
-      const nextEvaluators = evaluators.map(ev => 
-        ev.user_id === evaluator.user_id ? { ...ev, submission_token: null, mean_score: null } : ev
-      );
-      setEvaluators(nextEvaluators);
-      
-      const validScores = nextEvaluators
-        .map(s => s.mean_score !== null ? Number(s.mean_score) : null)
-        .filter((s): s is number => s !== null && !Number.isNaN(s));
-
-      if (validScores.length > 0) {
-        const newMean = validScores.reduce((a, b) => a + b, 0) / validScores.length;
-        setOfficeMean(Number(newMean.toFixed(2)));
-      } else {
-        setOfficeMean(null);
-      }
-    } catch (requestError) {
-      setError(requestError instanceof Error ? requestError.message : "The evaluation could not be removed.");
-    } finally {
-      setDeletingToken("");
-    }
-  }
-
   const currentTarget = availableTargets.find((target) => String(target.id) === targetId);
   const currentTargetSubtitle = currentTarget && targetSubtitle(currentTarget, isSuperAdmin);
   const roster: RosterEntry[] = evaluators.map((evaluator, index) => {
     const number = evaluator.evaluator_number ?? index + 1;
-    return isSuperAdmin
-      ? { evaluator, id: number, name: `Evaluator ${number}`, marker: String(number) }
-      : { evaluator, id: evaluator.user_id ?? number, name: evaluatorName(evaluator), marker: evaluatorInitials(evaluator) };
+    return { evaluator, id: number, name: `Evaluator ${number}`, marker: String(number) };
   });
-  const submittedCount = evaluators.filter(hasSubmission).length;
+  const submittedCount = evaluators.filter(evaluator => evaluator.submitted).length;
 
   return (
     <div className="mx-auto max-w-7xl space-y-7">
@@ -267,13 +212,13 @@ export function SubmissionsOverview({ audience = "admin" }: { audience?: "admin"
         title={isSuperAdmin ? "Submission Review" : "Review Submissions"}
         description={isSuperAdmin
           ? "Review submission status and individual scores by office."
-          : "Review evaluator submission status and office mean scores by evaluation cycle."}
+          : "Review office submission totals and mean scores by evaluation cycle."}
       >
         <label className="block w-full min-w-0 rounded-2xl border border-white/25 bg-white/10 p-4 text-sm font-semibold text-teal-50 sm:max-w-xs">
           Evaluation cycle
           <select
             value={cycleId}
-            disabled={loadingOptions || cycles.length === 0 || Boolean(deletingToken)}
+            disabled={loadingOptions || cycles.length === 0}
             onChange={(event) => {
               const nextCycleId = event.target.value;
               const nextCycle = cycles.find((cycle) => String(cycle.id) === nextCycleId);
@@ -317,7 +262,6 @@ export function SubmissionsOverview({ audience = "admin" }: { audience?: "admin"
                     <button
                       type="button"
                       aria-pressed={isSelected}
-                      disabled={Boolean(deletingToken)}
                       onClick={() => {
                         if (isSelected) return;
                         resetSelection();
@@ -383,7 +327,7 @@ export function SubmissionsOverview({ audience = "admin" }: { audience?: "admin"
               ) : (
                 <ul aria-label="Evaluators" className="divide-y divide-slate-100">
                   {roster.map(({ evaluator, id, name, marker }) => {
-                    const submitted = hasSubmission(evaluator);
+                    const submitted = evaluator.submitted;
                     return (
                       <li key={id} id={`review-evaluator-${id}`} tabIndex={-1} className="flex scroll-mt-24 flex-wrap items-center justify-between gap-3 px-5 py-4 transition hover:bg-slate-50/70 target:bg-teal-50 sm:px-6">
                         <div className="flex min-w-0 items-center gap-3">
@@ -400,21 +344,11 @@ export function SubmissionsOverview({ audience = "admin" }: { audience?: "admin"
                             <span aria-hidden="true" className="h-1.5 w-1.5 rounded-full bg-current" />
                             {submitted ? "Submitted" : "Pending"}
                           </span>
-                          {submitted && (isSuperAdmin ? (
+                          {submitted && isSuperAdmin && (
                             <span className="text-xs text-slate-700 tabular-nums">
-                              Total {scoreLabel(evaluator.total_score)} ? Mean {scoreLabel(evaluator.mean_score)}
+                              Total {scoreLabel(evaluator.total_score)} {" · "} Mean {scoreLabel(evaluator.mean_score)}
                             </span>
-                          ) : (
-                            <button
-                              type="button"
-                              aria-label={`Remove evaluation for ${name}`}
-                              onClick={() => removeSubmission(evaluator)}
-                              disabled={Boolean(deletingToken)}
-                              className="rounded-lg border border-red-200 px-3 py-2 text-xs font-semibold text-red-700 transition hover:bg-red-50 focus-visible:outline-2 focus-visible:outline-red-700 disabled:cursor-wait disabled:opacity-60"
-                            >
-                              {deletingToken === evaluator.submission_token ? "Removing…" : "Remove"}
-                            </button>
-                          ))}
+                          )}
                         </div>
                       </li>
                     );
