@@ -732,25 +732,62 @@ class RegistrationFlowTests(unittest.TestCase):
         with client.session_transaction() as session:
             session["user_id"] = 1
 
-        with patch("backend.core.connection", fake_connection), patch("backend.routes.admin.connection", fake_connection):
+        with patch("backend.core.connection", fake_connection), patch(
+            "backend.routes.admin.connection", fake_connection
+        ), patch(
+            "backend.routes.admin.fetch_all",
+            return_value=[{"submission_token": "123e4567-e89b-12d3-a456-426614174000"}],
+        ) as fetch_submissions, patch(
+            "backend.routes.admin._retract_submission"
+        ) as retract:
             response = client.delete("/api/admin/users/7")
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.get_json(), {"status": "deleted"})
         self.assertTrue(any("DELETE FROM users" in query for query, _ in connection.db_cursor.executed))
-        self.assertTrue(any("SELECT submission_token FROM participation" in query for query, _ in connection.db_cursor.executed))
+        fetch_submissions.assert_called_once()
+        self.assertIn(
+            "SELECT submission_token FROM participation WHERE user_id = %s FOR UPDATE",
+            fetch_submissions.call_args.args[1],
+        )
+        retract.assert_called_once_with(
+            connection.db_cursor, "123e4567-e89b-12d3-a456-426614174000"
+        )
+
+    def test_admin_cannot_delete_another_admin_account(self):
+        app = create_app({"SECRET_KEY": "test-secret", "TESTING": True})
+        connection = AdminConnection()
+        connection.db_cursor.deleted_user_role = "admin"
+
+        @contextmanager
+        def fake_connection(*args):
+            yield connection
+
+        client = app.test_client()
+        with client.session_transaction() as session:
+            session["user_id"] = 1
+
+        with patch("backend.core.connection", fake_connection), patch("backend.routes.admin.connection", fake_connection):
+            response = client.delete("/api/admin/users/7")
+
+        self.assertEqual(response.status_code, 409)
+        self.assertFalse(any("DELETE FROM users" in query for query, _ in connection.db_cursor.executed))
+        self.assertFalse(connection.committed)
 
 
 class AdminCursor:
     def __init__(self):
         self.query = ""
         self.executed = []
+        self.deleted_user_role = "evaluator"
 
     def execute(self, query, params=()):
         self.query = query
         self.executed.append((query, params))
 
     def fetchone(self):
+        if "SELECT id, role FROM users" in self.query:
+            return {"id": 7, "role": self.deleted_user_role}
         if "SELECT id, email, role" in self.query:
             return {"id": 1, "email": "admin@capsu.edu.ph", "role": "admin", "active": 1}
         if "SELECT role FROM users" in self.query:

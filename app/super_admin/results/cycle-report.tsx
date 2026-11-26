@@ -128,7 +128,7 @@ export default function CycleReport({ cycleId }: { cycleId: string }) {
           <h2 id="cycle-report-title" className="text-xl font-bold text-slate-900">All-office results</h2>
           <p className="mt-1 text-sm text-slate-600">{report?.cycle ?? "View scores, participation, and comments for the selected cycle."}</p>
         </div>
-        <button type="button" disabled={busy} onClick={generate} className="rounded-lg bg-teal-800 px-4 py-2.5 text-sm font-semibold text-white hover:bg-teal-900 disabled:opacity-60">
+        <button id="generate-cycle-summary" type="button" disabled={busy} onClick={generate} className="rounded-lg bg-teal-800 px-4 py-2.5 text-sm font-semibold text-white hover:bg-teal-900 disabled:opacity-60">
           {busy ? "Generating…" : report ? "Refresh summary" : "Generate summary"}
         </button>
       </div>

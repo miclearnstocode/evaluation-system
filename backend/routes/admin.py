@@ -487,9 +487,51 @@ def update_user(user_id: int):
     return jsonify(status="ok")
 
 
-@bp.get("/api/admin/surveys")
+@bp.delete("/api/admin/users/<int:user_id>")
 @require_role("admin")
+def delete_user(user_id: int):
+    actor = request_user()
+    if user_id == actor["id"]:
+        raise ApiError("You cannot delete your own account.", 409)
+
+    with connection() as conn:
+        cursor = conn.cursor(dictionary=True)
+        conn.start_transaction()
+        try:
+            user = fetch_one(
+                cursor,
+                "SELECT id, role FROM users WHERE id = %s FOR UPDATE",
+                (user_id,),
+            )
+            if not user:
+                raise ApiError("User not found.", 404)
+            if user["role"] != "evaluator":
+                raise ApiError("Only evaluator accounts can be deleted.", 409)
+
+            submissions = fetch_all(
+                cursor,
+                "SELECT submission_token FROM participation WHERE user_id = %s FOR UPDATE",
+                (user_id,),
+            )
+            for submission in submissions:
+                _retract_submission(cursor, submission["submission_token"])
+
+            cursor.execute("DELETE FROM users WHERE id = %s", (user_id,))
+            _audit(cursor, actor, "delete", "user", user_id)
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            cursor.close()
+    return jsonify(status="deleted")
+
+
+@bp.get("/api/admin/surveys")
+@require_role()
 def list_surveys():
+    if request_user()["role"] not in {"admin", "super_admin"}:
+        raise ApiError("You do not have permission to access this resource.", 403)
     with connection() as conn:
         cursor = conn.cursor(dictionary=True)
         rows = fetch_all(cursor, "SELECT id, title, description, version, status FROM surveys ORDER BY id DESC")
@@ -498,7 +540,7 @@ def list_surveys():
 
 
 @bp.post("/api/admin/surveys")
-@require_role("admin")
+@require_role("super_admin")
 def create_survey():
     payload = _json_body()
     title = str(payload.get("title", "")).strip()
@@ -520,7 +562,7 @@ def create_survey():
 
 
 @bp.get("/api/admin/surveys/<int:survey_id>")
-@require_role("admin")
+@require_role("super_admin")
 def get_survey(survey_id: int):
     with connection() as conn:
         cursor = conn.cursor(dictionary=True)
@@ -530,7 +572,7 @@ def get_survey(survey_id: int):
 
 
 @bp.put("/api/admin/surveys/<int:survey_id>")
-@require_role("admin")
+@require_role("super_admin")
 def update_survey(survey_id: int):
     payload = _json_body()
     title = str(payload.get("title", "")).strip()
@@ -553,7 +595,7 @@ def update_survey(survey_id: int):
 
 
 @bp.delete("/api/admin/surveys/<int:survey_id>")
-@require_role("admin")
+@require_role("super_admin")
 def delete_survey(survey_id: int):
     actor = request_user()
     with connection() as conn:
@@ -595,7 +637,7 @@ def delete_survey(survey_id: int):
 
 
 @bp.post("/api/admin/surveys/<int:survey_id>/publish")
-@require_role("admin")
+@require_role("super_admin")
 def publish_survey(survey_id: int):
     with connection() as conn:
         cursor = conn.cursor(dictionary=True)
@@ -614,7 +656,7 @@ def publish_survey(survey_id: int):
 
 
 @bp.post("/api/admin/surveys/<int:survey_id>/clone")
-@require_role("admin")
+@require_role("super_admin")
 def clone_survey(survey_id: int):
     with connection() as conn:
         cursor = conn.cursor(dictionary=True)
@@ -670,15 +712,12 @@ def list_cycles():
         raise ApiError("You do not have permission to access this resource.", 403)
     with connection() as conn:
         cursor = conn.cursor(dictionary=True)
-        if actor["role"] == "super_admin":
-            rows = _result_cycles(cursor)
-        else:
-            rows = fetch_all(
-                cursor,
-                "SELECT c.id, c.survey_id, c.target_type, c.title AS name, c.opens_at, c.closes_at, c.status, "
-                "c.min_responses, c.allow_same_campus, s.title AS survey_title "
-                "FROM eval_cycles c JOIN surveys s ON s.id = c.survey_id ORDER BY c.id DESC",
-            )
+        rows = fetch_all(
+            cursor,
+            "SELECT c.id, c.survey_id, c.target_type, c.title AS name, c.opens_at, c.closes_at, c.status, "
+            "c.min_responses, c.allow_same_campus, s.title AS survey_title "
+            "FROM eval_cycles c JOIN surveys s ON s.id = c.survey_id ORDER BY c.id DESC",
+        )
         for row in rows:
             row["target_ids"] = [
                 target["target_id"]
@@ -689,7 +728,7 @@ def list_cycles():
 
 
 @bp.post("/api/admin/cycles")
-@require_role("admin")
+@require_role("super_admin")
 def create_cycle():
     payload = _json_body()
     survey_id = _positive_id(payload.get("survey_id"), "survey_id")
@@ -717,8 +756,53 @@ def create_cycle():
     return jsonify(id=cycle_id), 201
 
 
+@bp.patch("/api/admin/cycles/<int:cycle_id>/schedule")
+@require_role("super_admin")
+def update_cycle_schedule(cycle_id: int):
+    payload = _json_body()
+    changes = {
+        field: _date_value(payload[field], field).replace(microsecond=0)
+        for field in ("opens_at", "closes_at")
+        if field in payload
+    }
+    if not changes:
+        raise ApiError("Provide an opening or closing date.")
+    with connection() as conn:
+        cursor = conn.cursor(dictionary=True)
+        cycle = fetch_one(
+            cursor,
+            "SELECT status, opens_at, closes_at FROM eval_cycles WHERE id = %s FOR UPDATE",
+            (cycle_id,),
+        )
+        if not cycle:
+            raise ApiError("Cycle not found.", 404)
+        if cycle["status"] not in {"draft", "open"}:
+            raise ApiError("Closed cycles cannot be rescheduled.", 409)
+        opens_at = changes.get("opens_at", cycle["opens_at"])
+        closes_at = changes.get("closes_at", cycle["closes_at"])
+        if closes_at <= opens_at:
+            raise ApiError("The closing time must be after the opening time.")
+        now = _utcnow_naive()
+        if cycle["status"] == "open":
+            if cycle["opens_at"] <= now and opens_at != cycle["opens_at"]:
+                raise ApiError("The opening time is locked once evaluations can begin.", 409)
+            if closes_at <= now:
+                raise ApiError("Choose a future closing time for an open cycle.", 409)
+        cursor.execute(
+            "UPDATE eval_cycles SET opens_at = %s, closes_at = %s WHERE id = %s",
+            (opens_at, closes_at, cycle_id),
+        )
+        _audit(cursor, request_user(), "update_schedule", "cycle", cycle_id)
+        conn.commit()
+        cursor.close()
+    return jsonify(
+        opens_at=opens_at.replace(tzinfo=timezone.utc).isoformat(),
+        closes_at=closes_at.replace(tzinfo=timezone.utc).isoformat(),
+    )
+
+
 @bp.put("/api/admin/cycles/<int:cycle_id>/rules")
-@require_role("admin")
+@require_role("super_admin")
 def update_cycle_rules(cycle_id: int):
     payload = _json_body()
     rules = payload.get("rules")
@@ -767,7 +851,7 @@ def update_cycle_rules(cycle_id: int):
 
 
 @bp.post("/api/admin/cycles/<int:cycle_id>/open")
-@require_role("admin")
+@require_role("super_admin")
 def open_cycle(cycle_id: int):
     with connection() as conn:
         cursor = conn.cursor(dictionary=True)
@@ -775,7 +859,7 @@ def open_cycle(cycle_id: int):
             cursor,
             "SELECT c.status, c.survey_id, c.closes_at, s.status AS survey_status, "
             "(SELECT COUNT(*) FROM cycle_targets WHERE cycle_id = c.id) AS target_count "
-            "FROM eval_cycles c JOIN surveys s ON s.id = c.survey_id WHERE c.id = %s",
+            "FROM eval_cycles c JOIN surveys s ON s.id = c.survey_id WHERE c.id = %s FOR UPDATE",
             (cycle_id,),
         )
         if not cycle:
@@ -791,11 +875,11 @@ def open_cycle(cycle_id: int):
 
 
 @bp.post("/api/admin/cycles/<int:cycle_id>/close")
-@require_role("admin")
+@require_role("super_admin")
 def close_cycle(cycle_id: int):
     with connection() as conn:
         cursor = conn.cursor(dictionary=True)
-        cycle = fetch_one(cursor, "SELECT status, closes_at FROM eval_cycles WHERE id = %s", (cycle_id,))
+        cycle = fetch_one(cursor, "SELECT status, closes_at FROM eval_cycles WHERE id = %s FOR UPDATE", (cycle_id,))
         if not cycle:
             raise ApiError("Cycle not found.", 404)
         if cycle["status"] != "open":

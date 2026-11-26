@@ -121,7 +121,7 @@ export default function OfficeStandingPage({
         title="Live Office Standing"
         description="Office means average the scores of submitted evaluations across survey sections."
       >
-        <label className="block w-full min-w-0 rounded-2xl border border-white/25 bg-white/10 p-4 text-sm font-semibold text-teal-50 sm:max-w-xs">
+        <label id="standing-cycle-filter" className="block w-full min-w-0 rounded-2xl border border-white/25 bg-white/10 p-4 text-sm font-semibold text-teal-50 sm:max-w-xs">
           Evaluation cycle
           <select
             value={cycleId}

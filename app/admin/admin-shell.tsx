@@ -14,13 +14,11 @@ const navigationGroups = [
       ["Campuses", "/admin/campuses"],
       ["Evaluation Targets", "/admin/targets"],
       ["Users", "/admin/users"],
-      ["Survey Builder", "/admin/survey-builder"],
     ],
   },
   {
     label: "Evaluations",
     links: [
-      ["Cycles", "/admin/cycles"],
       ["Participation", "/admin/participation"],
       ["Review Submissions", "/admin/submissions"],
     ],
@@ -30,6 +28,13 @@ const navigationGroups = [
 
 const superAdminNavigationGroups = [
   {
+    label: "Setup",
+    links: [
+      ["Survey Builder", "/super_admin/survey-builder"],
+      ["Cycles", "/super_admin/cycles"],
+    ],
+  },
+  {
     label: "Evaluation review",
     links: [
       ["Live Office Standing", "/super_admin/standing"],
@@ -38,6 +43,7 @@ const superAdminNavigationGroups = [
       ["Comments", "/super_admin/comments"],
     ],
   },
+  { label: "Help", links: [["Tutorial", "/super_admin/tutorial"]] },
 ] as const;
 
 type AdminSession = { id: number; email: string; role: "admin" | "super_admin" | "evaluator" };

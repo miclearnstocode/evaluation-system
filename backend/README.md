@@ -59,7 +59,7 @@ Administrators can view office-level mean scores only. Super administrators can 
 - `POST /api/auth/login`, `GET /api/auth/me`, `POST /api/auth/logout`
 - `GET /api/auth/registration-options`, `POST /api/auth/register`
 - `GET/POST/PATCH /api/admin/campuses`, `/offices`, `/administrators`
-- `GET/POST/PATCH/DELETE /api/admin/users`
+- `GET/POST/PATCH /api/admin/users`, `DELETE /api/admin/users/{id}` (evaluator accounts only; retracts their submissions)
 - Admin accounts manage campuses, offices, users, surveys, cycles, participation, comments, and audit records.
 - `GET /api/admin/standing` (aggregate mean for admins; section and evaluator means for super admins)
 - Super-admin accounts are results-only: `/super_admin/standing` and `/super_admin/results`.

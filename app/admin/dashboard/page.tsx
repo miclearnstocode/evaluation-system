@@ -17,7 +17,6 @@ type DashboardData = {
   campuses: number;
   targets: number;
   users: number;
-  surveys: number;
   cycles: Cycle[];
 };
 
@@ -37,16 +36,14 @@ export default function AdminDashboardPage() {
       apiFetch<{ items: { id: number }[] }>("/api/admin/campuses"),
       apiFetch<{ items: { id: number }[] }>("/api/admin/offices"),
       apiFetch<{ items: { id: number }[] }>("/api/admin/users"),
-      apiFetch<{ items: { id: number }[] }>("/api/admin/surveys"),
       apiFetch<{ items: Cycle[] }>("/api/admin/cycles"),
     ])
-      .then(([campuses, targets, users, surveys, cycles]) => {
+      .then(([campuses, targets, users, cycles]) => {
         if (!active) return;
         setData({
           campuses: campuses.items.length,
           targets: targets.items.length,
           users: users.items.length,
-          surveys: surveys.items.length,
           cycles: cycles.items,
         });
       })
@@ -63,7 +60,6 @@ export default function AdminDashboardPage() {
         { label: "Campuses", value: data.campuses, href: "/admin/campuses" },
         { label: "Evaluation targets", value: data.targets, href: "/admin/targets" },
         { label: "User accounts", value: data.users, href: "/admin/users" },
-        { label: "Surveys", value: data.surveys, href: "/admin/survey-builder" },
       ]
     : [];
   const openCycles = data?.cycles.filter((cycle) => cycle.status === "open").length;
@@ -107,7 +103,7 @@ export default function AdminDashboardPage() {
         <section aria-labelledby="system-overview">
           <h2 id="system-overview" className="text-xl font-bold tracking-tight text-[#1F3A5F]">System overview</h2>
           {data ? (
-            <div className="mt-4 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+            <div className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
               {stats.map((stat) => (
                 <Link
                   key={stat.label}
@@ -140,9 +136,6 @@ export default function AdminDashboardPage() {
               <p className="mt-1 text-sm text-slate-600">Showing {recentCycles.length} of {data.cycles.length} cycles</p>
             )}
           </div>
-          <Link href="/admin/cycles" className="inline-flex items-center gap-2 rounded-xl border border-teal-200 bg-teal-50 px-4 py-2.5 text-sm font-semibold text-teal-900 transition hover:bg-teal-100 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-teal-700">
-            Manage cycles <span aria-hidden="true">→</span>
-          </Link>
         </div>
         {recentCycles.length === 0 ? (
           <p className="px-5 py-8 text-sm text-slate-600 sm:px-6">

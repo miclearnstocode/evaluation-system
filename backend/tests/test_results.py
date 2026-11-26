@@ -110,6 +110,8 @@ class AdminResultsTests(unittest.TestCase):
             response = client.post(
                 "/api/admin/users",
                 json={
+                    "first_name": "Office",
+                    "last_name": "Admin",
                     "email": "office.admin@capsu.edu.ph",
                     "password": "secure-admin-password",
                     "role": "admin",
@@ -119,11 +121,14 @@ class AdminResultsTests(unittest.TestCase):
         self.assertEqual(response.status_code, 201)
         self.assertEqual(response.get_json(), {"id": 15})
         query, parameters = connection.db_cursor.executed[0]
-        self.assertIn("VALUES (%s, %s, %s, 1)", query)
-        self.assertEqual(parameters[0], "office.admin@capsu.edu.ph")
-        self.assertEqual(parameters[2], "admin")
+        self.assertIn("VALUES (%s, %s, %s, %s, 'admin', 1)", query)
+        self.assertEqual(
+            parameters[:3],
+            ("Office", "Admin", "office.admin@capsu.edu.ph"),
+        )
+        self.assertTrue(parameters[3])
 
-    def test_admin_can_update_a_draft_survey(self):
+    def test_super_admin_can_update_a_draft_survey(self):
         app = create_app({"SECRET_KEY": "test-secret", "TESTING": True})
         connection = ResultsConnection()
         sections = [{"title": "Service", "questions": [{"text": "Was it helpful?"}]}]
@@ -133,7 +138,7 @@ class AdminResultsTests(unittest.TestCase):
             yield connection
 
         with patch(
-            "backend.core._current_user", return_value={"id": 2, "role": "admin"}
+            "backend.core._current_user", return_value={"id": 2, "role": "super_admin"}
         ), patch("backend.routes.admin.connection", fake_connection), patch(
             "backend.routes.admin.fetch_one", return_value={"id": 5, "status": "draft"}
         ), patch("backend.routes.admin.validate_survey_payload", return_value=sections), patch(
@@ -163,7 +168,7 @@ class AdminResultsTests(unittest.TestCase):
             yield connection
 
         with patch(
-            "backend.core._current_user", return_value={"id": 2, "role": "admin"}
+            "backend.core._current_user", return_value={"id": 2, "role": "super_admin"}
         ), patch("backend.routes.admin.connection", fake_connection), patch(
             "backend.routes.admin.fetch_one",
             return_value={"id": 5, "status": "published"},
@@ -184,7 +189,7 @@ class AdminResultsTests(unittest.TestCase):
         self.assertTrue(all("DELETE FROM sections" not in query for query, _ in connection.db_cursor.executed))
         update_content.assert_called_once_with(connection.db_cursor, 5, sections)
 
-    def test_admin_can_delete_unreferenced_survey(self):
+    def test_super_admin_can_delete_unreferenced_survey(self):
         app = create_app({"SECRET_KEY": "test-secret", "TESTING": True})
         connection = ResultsConnection()
 
@@ -193,7 +198,7 @@ class AdminResultsTests(unittest.TestCase):
             yield connection
 
         with patch(
-            "backend.core._current_user", return_value={"id": 2, "role": "admin"}
+            "backend.core._current_user", return_value={"id": 2, "role": "super_admin"}
         ), patch("backend.routes.admin.connection", fake_connection), patch(
             "backend.routes.admin.fetch_one", side_effect=[{"id": 5}, None]
         ), patch.object(connection, "start_transaction") as start_transaction:
@@ -208,7 +213,7 @@ class AdminResultsTests(unittest.TestCase):
         self.assertTrue(any("INSERT INTO admin_audit_log" in query for query, _ in connection.db_cursor.executed))
         start_transaction.assert_not_called()
 
-    def test_admin_cannot_delete_survey_used_by_cycle(self):
+    def test_super_admin_cannot_delete_survey_used_by_cycle(self):
         app = create_app({"SECRET_KEY": "test-secret", "TESTING": True})
         connection = ResultsConnection()
 
@@ -217,7 +222,7 @@ class AdminResultsTests(unittest.TestCase):
             yield connection
 
         with patch(
-            "backend.core._current_user", return_value={"id": 2, "role": "admin"}
+            "backend.core._current_user", return_value={"id": 2, "role": "super_admin"}
         ), patch("backend.routes.admin.connection", fake_connection), patch(
             "backend.routes.admin.fetch_one", side_effect=[{"id": 5}, {"id": 9}]
         ):
@@ -239,7 +244,7 @@ class AdminResultsTests(unittest.TestCase):
             yield connection
 
         with patch(
-            "backend.core._current_user", return_value={"id": 2, "role": "admin"}
+            "backend.core._current_user", return_value={"id": 2, "role": "super_admin"}
         ), patch("backend.routes.admin.connection", fake_connection), patch(
             "backend.routes.admin.fetch_one", side_effect=[{"id": 5}, None]
         ), patch.object(
@@ -255,6 +260,56 @@ class AdminResultsTests(unittest.TestCase):
         self.assertEqual(response.status_code, 409)
         self.assertIn("referenced by an evaluation cycle", response.get_json()["error"])
         rollback.assert_called_once()
+
+    def test_survey_builder_routes_reject_regular_admins_and_evaluators(self):
+        app = create_app({"SECRET_KEY": "test-secret", "TESTING": True})
+        client = app.test_client()
+        actions = [
+            ("POST", "/api/admin/surveys"),
+            ("GET", "/api/admin/surveys/5"),
+            ("PUT", "/api/admin/surveys/5"),
+            ("DELETE", "/api/admin/surveys/5"),
+            ("POST", "/api/admin/surveys/5/publish"),
+            ("POST", "/api/admin/surveys/5/clone"),
+        ]
+        with client.session_transaction() as session:
+            session["user_id"] = 2
+        for role in ("admin", "evaluator"):
+            with patch("backend.core._current_user", return_value={"id": 2, "role": role}):
+                for method, url in actions:
+                    with self.subTest(role=role, method=method, url=url):
+                        self.assertEqual(client.open(url, method=method).status_code, 403)
+
+    def test_super_admin_creates_survey_and_admin_can_list_it(self):
+        app = create_app({"SECRET_KEY": "test-secret", "TESTING": True})
+        connection = ResultsConnection()
+        sections = [{"title": "Service", "questions": [{"text": "Was it helpful?"}]}]
+        connection.db_cursor.lastrowid = 15
+        surveys = [{"id": 15, "title": "Office form", "status": "draft"}]
+
+        @contextmanager
+        def fake_connection(*args):
+            yield connection
+
+        client = app.test_client()
+        with client.session_transaction() as session:
+            session["user_id"] = 2
+        with patch("backend.routes.admin.connection", fake_connection), patch(
+            "backend.routes.admin.validate_survey_payload", return_value=sections
+        ), patch("backend.routes.admin._insert_survey_content") as insert_content, patch(
+            "backend.routes.admin.fetch_all", return_value=surveys
+        ):
+            with patch("backend.core._current_user", return_value={"id": 2, "role": "super_admin"}):
+                response = client.post("/api/admin/surveys", json={"title": "Office form", "sections": sections})
+                self.assertEqual(response.status_code, 201)
+                self.assertEqual(response.get_json(), {"id": surveys[0]["id"]})
+                insert_content.assert_called_once_with(connection.db_cursor, surveys[0]["id"], sections)
+                self.assertEqual(client.get("/api/admin/surveys").get_json(), {"items": surveys})
+            with patch("backend.core._current_user", return_value={"id": 2, "role": "admin"}):
+                self.assertEqual(client.get("/api/admin/surveys").get_json(), {"items": surveys})
+            with patch("backend.core._current_user", return_value={"id": 2, "role": "evaluator"}):
+                self.assertEqual(client.get("/api/admin/surveys").status_code, 403)
+
 
     def test_admin_standing_contains_only_the_office_mean(self):
         app = create_app({"SECRET_KEY": "test-secret", "TESTING": True})
@@ -434,6 +489,9 @@ class AdminResultsTests(unittest.TestCase):
                 "submission_token": "123e4567-e89b-12d3-a456-426614174000",
                 "submitted_at": "2026-11-23 09:00:00",
                 "evaluator_email": "evaluator@capsu.edu.ph",
+                "first_name": "Eval",
+                "last_name": "User",
+                "mean_score": None,
             }
         ]
 
@@ -458,7 +516,10 @@ class AdminResultsTests(unittest.TestCase):
             response = client.get("/api/admin/submissions?cycle_id=3&target_id=9")
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.get_json(), {"items": submissions})
+        body = response.get_json()
+        self.assertIsNone(body["office_mean"])
+        self.assertEqual(body["items"][0]["full_name"], "Eval User")
+        self.assertIsNone(body["items"][0]["mean_score"])
 
     def test_super_admin_submission_list_includes_each_evaluators_scores(self):
         app = create_app({"SECRET_KEY": "test-secret", "TESTING": True})
@@ -572,10 +633,120 @@ class AdminResultsTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 403)
 
+    def test_cycle_mutations_require_super_admin(self):
+        app = create_app({"SECRET_KEY": "test-secret", "TESTING": True})
+        client = app.test_client()
+        with client.session_transaction() as session:
+            session["user_id"] = 1
+        actions = [
+            ("POST", "/api/admin/cycles"),
+            ("PUT", "/api/admin/cycles/3/rules"),
+            ("PATCH", "/api/admin/cycles/3/schedule"),
+            ("POST", "/api/admin/cycles/3/open"),
+            ("POST", "/api/admin/cycles/3/close"),
+        ]
+        with patch("backend.core._current_user", return_value={"id": 1, "role": "admin"}):
+            for method, url in actions:
+                with self.subTest(method=method, url=url):
+                    self.assertEqual(client.open(url, method=method, json={}).status_code, 403)
+
+    def test_super_admin_can_create_and_list_draft_cycles(self):
+        app = create_app({"SECRET_KEY": "test-secret", "TESTING": True})
+        connection = ResultsConnection()
+        connection.db_cursor.lastrowid = 3
+        cycle = {"id": 3, "name": "Upcoming cycle", "status": "draft"}
+        client = app.test_client()
+
+        @contextmanager
+        def fake_connection(*args):
+            yield connection
+
+        with client.session_transaction() as session:
+            session["user_id"] = 1
+        with patch("backend.core._current_user", return_value={"id": 1, "role": "super_admin"}), patch(
+            "backend.routes.admin.connection", fake_connection
+        ), patch("backend.routes.admin.fetch_one", return_value={"id": 5, "status": "published"}), patch(
+            "backend.routes.admin._insert_all_cycle_targets"
+        ) as insert_targets, patch("backend.routes.admin._insert_default_rules"), patch(
+            "backend.routes.admin.fetch_all", side_effect=[[cycle], [{"target_id": 9}]]
+        ) as fetch_all:
+            created = client.post("/api/admin/cycles", json={
+                "name": cycle["name"],
+                "survey_id": 5,
+                "opens_at": "2026-12-01T00:00:00Z",
+                "closes_at": "2026-12-31T00:00:00Z",
+            })
+            listed = client.get("/api/admin/cycles")
+
+        self.assertEqual(created.status_code, 201)
+        self.assertEqual(created.get_json(), {"id": 3})
+        insert_targets.assert_called_once_with(connection.db_cursor, 3)
+        self.assertEqual(listed.status_code, 200)
+        self.assertEqual(listed.get_json(), {"items": [{**cycle, "target_ids": [9]}]})
+        self.assertNotIn("c.status IN", fetch_all.call_args_list[0].args[1])
+
+    def test_super_admin_can_save_cycle_schedule_in_utc(self):
+        app = create_app({"SECRET_KEY": "test-secret", "TESTING": True})
+        connection = ResultsConnection()
+        cycle = {"status": "draft", "opens_at": datetime(2026, 12, 1), "closes_at": datetime(2026, 12, 5)}
+
+        @contextmanager
+        def fake_connection(*args):
+            yield connection
+
+        client = app.test_client()
+        with client.session_transaction() as session:
+            session["user_id"] = 1
+        with patch("backend.core._current_user", return_value={"id": 1, "role": "super_admin"}), patch(
+            "backend.routes.admin.connection", fake_connection
+        ), patch("backend.routes.admin.fetch_one", return_value=cycle):
+            response = client.patch("/api/admin/cycles/3/schedule", json={
+                "opens_at": "2026-12-02T08:00:00+08:00",
+                "closes_at": "2026-12-06T18:30:00+08:00",
+            })
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.get_json(), {
+            "opens_at": "2026-12-02T00:00:00+00:00",
+            "closes_at": "2026-12-06T10:30:00+00:00",
+        })
+        self.assertEqual(connection.db_cursor.executed[0], (
+            "UPDATE eval_cycles SET opens_at = %s, closes_at = %s WHERE id = %s",
+            (datetime(2026, 12, 2), datetime(2026, 12, 6, 10, 30), 3),
+        ))
+
+    def test_cycle_schedule_respects_status_and_date_order(self):
+        app = create_app({"SECRET_KEY": "test-secret", "TESTING": True})
+        connection = ResultsConnection()
+        cycle = {"status": "open", "opens_at": datetime(2026, 12, 1), "closes_at": datetime(2026, 12, 5)}
+
+        @contextmanager
+        def fake_connection(*args):
+            yield connection
+
+        client = app.test_client()
+        with client.session_transaction() as session:
+            session["user_id"] = 1
+        with patch("backend.core._current_user", return_value={"id": 1, "role": "super_admin"}), patch(
+            "backend.routes.admin.connection", fake_connection
+        ), patch("backend.routes.admin.fetch_one", return_value=cycle), patch(
+            "backend.routes.admin._utcnow_naive", return_value=datetime(2026, 12, 3)
+        ):
+            url = "/api/admin/cycles/3/schedule"
+            self.assertEqual(client.patch(url, json={"closes_at": "2026-11-30T00:00:00Z"}).status_code, 400)
+            self.assertEqual(client.patch(url, json={"opens_at": "2026-12-02T00:00:00Z"}).status_code, 409)
+            response = client.patch(url, json={"closes_at": "2026-12-08T00:00:00Z"})
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(response.get_json()["opens_at"], "2026-12-01T00:00:00+00:00")
+            cycle["status"] = "closed"
+            self.assertEqual(client.patch(url, json={"closes_at": "2026-12-08T00:00:00Z"}).status_code, 409)
+        updates = [query for query, _ in connection.db_cursor.executed if query.startswith("UPDATE eval_cycles")]
+        self.assertEqual(len(updates), 1)
+
     def test_cycle_rules_reject_evaluator_group_filters(self):
         app = create_app({"SECRET_KEY": "test-secret", "TESTING": True})
 
-        with patch("backend.core._current_user", return_value={"id": 1, "role": "admin"}):
+        with patch("backend.core._current_user", return_value={"id": 1, "role": "super_admin"}):
             client = app.test_client()
             with client.session_transaction() as session:
                 session["user_id"] = 1
